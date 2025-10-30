@@ -1,3 +1,4 @@
+//include dificultate, simptome,script pentru hardcodare
 export type Difficulty = 'Ușor' | 'Mediu' | 'Dificil'
 
 export interface SymptomMap {
