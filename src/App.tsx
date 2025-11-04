@@ -5,6 +5,8 @@ import { Route, Redirect } from 'react-router-dom';
 
 import SelectionPage from './pages/SelectionPage';
 import ChatPage from './pages/ChatPage';
+import LoginPage from './pages/LoginPage';
+import HistoryPage from './pages/HistoryPage';
 
 import '@ionic/react/css/core.css';
 import '@ionic/react/css/normalize.css';
@@ -23,15 +25,12 @@ const App: React.FC = () => (
     <IonApp>
       <IonReactRouter>
         <IonRouterOutlet>
-          <Route exact path="/">
-            <SelectionPage />
-          </Route>
-          <Route exact path="/chat">
-            <ChatPage />
-          </Route>
-          <Route exact path="/home">
-            <Redirect to="/" />
-          </Route>
+            <Route exact path="/" render={() => <Redirect to="/login" />} />
+            <Route exact path="/login" component={LoginPage} />
+            <Route exact path="/select" component={SelectionPage} />
+            <Route exact path="/chat" component={ChatPage} />
+            <Route exact path="/history" component={HistoryPage} />
+            <Route render={() => <Redirect to="/login" />} />
         </IonRouterOutlet>
       </IonReactRouter>
     </IonApp>
