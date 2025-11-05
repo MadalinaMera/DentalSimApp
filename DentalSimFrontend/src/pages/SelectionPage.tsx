@@ -1,8 +1,6 @@
 import {
     IonContent,
-    IonHeader,
     IonPage,
-    IonToolbar,
     IonButton,
     IonItem,
     IonLabel,
@@ -81,6 +79,14 @@ const SelectionPage: React.FC = () => {
                         onClick={startChat}
                     >
                         Începe Conversație
+                    </IonButton>
+                    <IonButton
+                        expand="block"
+                        fill="clear"
+                        className="ion-margin-top"
+                        routerLink="/history"
+                    >
+                        Vezi istoricul conversațiilor →
                     </IonButton>
                 </div>
             </IonContent>
