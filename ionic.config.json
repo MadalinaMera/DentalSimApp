@@ -1,7 +1,0 @@
-{
-  "name": "DentalSimFrontend",
-  "integrations": {
-    "capacitor": {}
-  },
-  "type": "react-vite"
-}
