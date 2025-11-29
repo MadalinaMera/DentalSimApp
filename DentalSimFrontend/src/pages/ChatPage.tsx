@@ -1,141 +1,184 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react';
 import {
     IonButton, IonContent, IonFooter, IonHeader, IonIcon, IonInput,
-    IonLabel, IonList, IonNote, IonPage, IonTitle, IonToolbar
-} from '@ionic/react'
-import { arrowBack, send } from 'ionicons/icons'
-import { useHistory } from 'react-router-dom'
-import { patientScenarios, PatientScenario, Difficulty } from '../data/pacientData'
+    IonLabel, IonList, IonNote, IonPage, IonTitle, IonToolbar, IonSpinner, IonCard, IonCardHeader, IonCardTitle, IonCardContent
+} from '@ionic/react';
+import { arrowBack, send, flask, chatbubbleEllipses } from 'ionicons/icons';
+import { useHistory } from 'react-router-dom';
 
-type Sender = 'student' | 'patient'
-interface Message { text: string; sender: Sender }
-
-function normalize(s: string) {
-    return s
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-}
-
-function pickRandomByDifficulty(difficulty: Difficulty): PatientScenario {
-    const pool = patientScenarios.filter(p => p.difficulty === difficulty)
-    const list = pool.length ? pool : patientScenarios // fallback dacă nu găsește
-    return list[Math.floor(Math.random() * list.length)]
-}
+type Sender = 'student' | 'patient';
+interface Message { text: string; sender: Sender; }
 
 const ChatPage: React.FC = () => {
-    const history = useHistory()
-    const [messages, setMessages] = useState<Message[]>([])
-    const [input, setInput] = useState('')
-    const [scriptIndex, setScriptIndex] = useState(0)
-    const contentRef = useRef<HTMLIonContentElement | null>(null)
+    const history = useHistory();
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [input, setInput] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [caseStarted, setCaseStarted] = useState(false); // Ținem minte dacă am început cazul
+    const [activeDisease, setActiveDisease] = useState<string>(""); // (Opțional) Să știm ce boală e (pentru debug)
+    const contentRef = useRef<HTMLIonContentElement | null>(null);
 
-    const params = new URLSearchParams(window.location.search)
-    const difficulty = (params.get('difficulty') as Difficulty) || 'Mediu'
+    // URL-ul backend-ului Flask (localhost:8000)
+    const BASE_URL = "http://localhost:8000";
 
-    const scenario = useMemo(() => pickRandomByDifficulty(difficulty), [difficulty])
+    // 1. Funcția care PORNEȘTE simularea (Alege boala)
+    const startSimulation = async () => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`${BASE_URL}/chat/start/random`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
 
-    useEffect(() => {
-        const firstLines = scenario.script.slice(0, 1).map(text => ({ sender: 'patient' as Sender, text }))
-        setMessages(firstLines.length ? firstLines : [
-            { sender: 'patient', text: 'Bună ziua.' }
-        ])
-        setScriptIndex(firstLines.length)
-    }, [scenario])
+            const data = await response.json();
 
-    function generatePatientReply(question: string): string {
-        const q = normalize(question)
+            if (response.ok) {
+                setCaseStarted(true);
+                // setActiveDisease(data.name); // Dacă vrei să afișezi numele bolii (pentru test)
 
-        for (const key of Object.keys(scenario.symptoms)) {
-            const nk = normalize(key)
-            if (q.includes(nk)) {
-                return scenario.symptoms[key]
+                // Adăugăm un mesaj de bun venit din partea sistemului (nu de la pacient)
+                setMessages([{
+                    sender: 'patient',
+                    text: "** The pacient has joined the chat. **"
+                }]);
+            } else {
+                alert("Eroare la pornire: " + data.error);
             }
+        } catch (error) {
+            console.error(error);
+            alert("Cannot connect to the server");
+        } finally {
+            setIsLoading(false);
         }
-        if (scriptIndex < scenario.script.length) {
-            const line = scenario.script[scriptIndex]
-            setScriptIndex(scriptIndex + 1)
-            return line
-        }
+    };
 
-        if (scenario.difficulty === 'Ușor') {
-            return 'Mă deranjează mai ales la rece, dar trece repede.'
-        }
-        if (scenario.difficulty === 'Mediu') {
-            return 'Simptomele persistă de ceva timp; sângerează uneori și e sensibil.'
-        }
-        return 'Durerea e intensă și constantă, s-a și umflat puțin.'
-    }
+    // 2. Funcția care TRIMITE mesaje la Llama (Chat)
+    const sendMessageToBackend = async (text: string) => {
+        setIsLoading(true);
+        try {
+            const response = await fetch(`${BASE_URL}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: text }),
+            });
 
-    function handleSend() {
-        const text = input.trim()
-        if (!text) return
-        const studentMsg: Message = { text, sender: 'student' }
-        setMessages(prev => [...prev, studentMsg])
-        setInput('')
+            const data = await response.json();
 
-        const reply = generatePatientReply(text)
-        setTimeout(() => {
-            setMessages(prev => [...prev, { sender: 'patient', text: reply }])
-            contentRef.current?.scrollToBottom(300)
-        }, 500)
-    }
+            if (response.ok) {
+                setMessages(prev => [...prev, { sender: 'patient', text: data.reply }]);
+            } else {
+                setMessages(prev => [...prev, { sender: 'patient', text: "(Eroare: " + data.error + ")" }]);
+            }
+
+        } catch (error) {
+            setMessages(prev => [...prev, { sender: 'patient', text: "(Eroare rețea)" }]);
+        } finally {
+            setIsLoading(false);
+            contentRef.current?.scrollToBottom(300);
+        }
+    };
+
+    const handleSend = () => {
+        const text = input.trim();
+        if (!text || isLoading) return;
+
+        // Adăugăm mesajul studentului
+        setMessages(prev => [...prev, { text, sender: 'student' }]);
+        setInput('');
+
+        // Trimitem la backend
+        sendMessageToBackend(text);
+    };
 
     return (
         <IonPage>
             <IonHeader>
-                <IonToolbar color="secondary">
+                <IonToolbar color="primary">
                     <IonButton slot="start" onClick={() => history.goBack()}>
                         <IonIcon icon={arrowBack} />
                     </IonButton>
-                    <IonTitle>
-                        Pacient Virtual
-                    </IonTitle>
+                    <IonTitle>Simulator Clinic</IonTitle>
                 </IonToolbar>
             </IonHeader>
 
             <IonContent ref={contentRef} fullscreen className="ion-padding">
-                <IonList lines="none">
-                    {messages.map((m, i) => (
-                        <div key={i} className={`ion-text-${m.sender === 'student' ? 'end' : 'start'} ion-margin-vertical`}>
-                            <div style={{ maxWidth: '90%', display: 'inline-block' }}>
-                                <IonLabel
-                                    className="ion-padding ion-text-wrap"
-                                    style={{
-                                        borderRadius: 15,
-                                        display: 'block',
-                                        background: m.sender === 'student' ? '#2f66ff' : '#f3f4f6',
-                                        color: m.sender === 'student' ? '#fff' : '#000',
-                                        border: '1px solid #ddd'
-                                    }}
-                                >
-                                    {m.text}
-                                </IonLabel>
-                                <IonNote style={{ display: 'block', opacity: .6, marginTop: 4 }}>
-                                    {m.sender === 'student' ? 'Tu (student)' : 'Pacient Virtual'}
-                                </IonNote>
+
+                {/* A. Ecranul de START (Dacă nu a început cazul) */}
+                {!caseStarted ? (
+                    <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
+                        <IonCard style={{ textAlign: 'center', padding: '20px' }}>
+                            <IonCardHeader>
+                                <IonIcon icon={flask} style={{ fontSize: '64px', color: '#3880ff' }} />
+                                <IonCardTitle>Caz Clinic Aleatoriu</IonCardTitle>
+                            </IonCardHeader>
+                            <IonCardContent>
+                                <p>Apasă pe buton pentru a genera un pacient virtual cu una dintre cele 9 afecțiuni studiate.</p>
+                                <br />
+                                <IonButton expand="block" onClick={startSimulation} disabled={isLoading}>
+                                    {isLoading ? <IonSpinner name="crescent" /> : "GENEREAZĂ PACIENT"}
+                                </IonButton>
+                            </IonCardContent>
+                        </IonCard>
+                    </div>
+                ) : (
+                    /* B. Ecranul de CHAT (Dacă a început cazul) */
+                    <IonList lines="none">
+                        {messages.map((m, i) => (
+                            <div key={i} className={`ion-text-${m.sender === 'student' ? 'end' : 'start'} ion-margin-vertical`}>
+                                <div style={{ maxWidth: '85%', display: 'inline-block', textAlign: 'left' }}>
+                                    <IonLabel
+                                        className="ion-padding ion-text-wrap"
+                                        style={{
+                                            borderRadius: 15,
+                                            display: 'block',
+                                            background: m.sender === 'student' ? '#3880ff' : '#e0e0e0',
+                                            color: m.sender === 'student' ? '#fff' : '#000',
+                                        }}
+                                    >
+                                        {m.text}
+                                    </IonLabel>
+                                    <IonNote style={{ fontSize: '0.8em', marginLeft: 5 }}>
+                                        {m.sender === 'student' ? 'Student' : 'Pacient'}
+                                    </IonNote>
+                                </div>
                             </div>
-                        </div>
-                    ))}
-                </IonList>
+                        ))}
+                        {isLoading && (
+                            <div className="ion-margin-top ion-text-center">
+                                <IonSpinner name="dots" color="primary" />
+                            </div>
+                        )}
+                    </IonList>
+                )}
+
             </IonContent>
 
-            <IonFooter>
-                <IonToolbar>
-                    <IonInput
-                        value={input}
-                        placeholder="Întrebare către pacient..."
-                        onIonChange={e => setInput(e.detail.value!)}
-                        onKeyPress={e => e.key === 'Enter' && handleSend()}
-                        style={{ border: '1px solid #ccc', borderRadius: 20, margin: 8, padding: '4px 10px' }}
-                    />
-                    <IonButton slot="end" onClick={handleSend} disabled={!input.trim()}>
-                        <IonIcon icon={send} />
-                    </IonButton>
-                </IonToolbar>
-            </IonFooter>
+            {/* Bara de jos apare doar dacă cazul a început */}
+            {caseStarted && (
+                <IonFooter>
+                    <IonToolbar>
+                        <IonInput
+                            value={input}
+                            placeholder="Întreabă pacientul..."
+                            onIonChange={e => setInput(e.detail.value!)}
+                            onKeyPress={e => e.key === 'Enter' && handleSend()}
+                            disabled={isLoading}
+                            style={{
+                                background: '#f0f0f0',
+                                borderRadius: '20px',
+                                paddingLeft: '10px',
+                                margin: '5px'
+                            }}
+                        />
+                        <IonButton slot="end" onClick={handleSend} disabled={!input.trim() || isLoading}>
+                            <IonIcon icon={send} />
+                        </IonButton>
+                    </IonToolbar>
+                </IonFooter>
+            )}
         </IonPage>
-    )
-}
+    );
+};
 
-export default ChatPage
+export default ChatPage;
