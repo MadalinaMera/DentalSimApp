@@ -2,8 +2,6 @@ import { IonApp, IonRouterOutlet, setupIonicReact } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 import { Route, Redirect } from 'react-router-dom';
 
-
-import SelectionPage from './pages/SelectionPage';
 import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
 import HistoryPage from './pages/HistoryPage';
@@ -27,7 +25,6 @@ const App: React.FC = () => (
         <IonRouterOutlet>
             <Route exact path="/" render={() => <Redirect to="/login" />} />
             <Route exact path="/login" component={LoginPage} />
-            <Route exact path="/select" component={SelectionPage} />
             <Route exact path="/chat" component={ChatPage} />
             <Route exact path="/history" component={HistoryPage} />
             <Route render={() => <Redirect to="/login" />} />

@@ -32,7 +32,7 @@ const LoginPage: React.FC = () => {
             } else {
                 localStorage.setItem(TOKEN_KEY, data.token)
                 localStorage.setItem(USER_KEY, data.user?.username || u)
-                history.push('/select')
+                history.push('/chat')
             }
         } catch (err:any) {
             console.error('Eroare la autentificare:', err)
@@ -82,7 +82,7 @@ const LoginPage: React.FC = () => {
                         disabled={!username.trim() || !password || loading}
                         onClick={handleLogin}
                     >
-                        {loading ? 'Autentificare...' : 'Autentificarep'}
+                        {loading ? 'Authentication...' : 'Autentication'}
                     </IonButton>
                 </div>
             </IonContent>
