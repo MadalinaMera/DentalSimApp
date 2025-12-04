@@ -7,22 +7,22 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.sql.expression import func
 
 app = Flask(__name__)
+# Allow CORS for the frontend (Ionic/React)
 CORS(app, resources={r"/*": {"origins": "http://localhost:8100"}}, supports_credentials=True)
-
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+# URL for the LLM hosted on Colab/Ngrok
 COLAB_URL = "https://sharon-preperusal-preobediently.ngrok-free.dev"
-
 HF_URL = f"{COLAB_URL}/generate"
 
 HF_HEADERS = {
-              "Content-Type": "application/json"
-              }
+    "Content-Type": "application/json"
+}
 
-
+# --- DATABASE MODELS ---
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -30,9 +30,10 @@ class User(db.Model):
 
 class Disease(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), unique=True, nullable=False) # Ex: "Reversible Pulpitis"
-    system_prompt = db.Column(db.Text, nullable=False) # Promptul lung structurat
+    name = db.Column(db.String(100), unique=True, nullable=False)
+    system_prompt = db.Column(db.Text, nullable=False)
 
+# --- SEED DATA ---
 DISEASE_DATA = [
     {
         "name": "Simple Caries",
@@ -67,8 +68,8 @@ DISEASE_DATA = [
         "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Pericoronitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Jaw Stiffness (Trismus):** You have difficulty opening your mouth fully. It feels \"locked\" or stiff.\n* **Localized Gum Pain:** The pain is strictly in the gum **behind the last molar** (wisdom tooth).\n* **Pain on Swallowing:** The pain radiates to your throat or ear when you swallow.\n* **Bad Taste:** You have a foul, salty, or metallic taste in your mouth (due to pus discharge).\n* **Gum Flap:** You feel a swollen piece of gum over the tooth that hurts when you bite down.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Thermal Sensitivity:** The tooth itself DOES NOT hurt to cold or heat. The nerve is fine.\n* **NO Cavity Pain:** It is not a \"toothache\" from a hole in the tooth.\n* **NO High Tooth:** The tooth does not feel extruded/long (distinguishes from Apical Periodontitis).\n* **NO Numbness:** You do not have a numb lip.\n\n### BEHAVIOR GUIDELINES\n1. **Be Protective:** You hesitate to open your mouth wide because it hurts.\n2. **Be Clear:** Emphasize that the **gum** is the problem, not the tooth.\n3. **Refuse Irrelevance:** If asked about irrelevant topics, say: \"It hurts to talk too much, please focus on the exam.\"\n4. **Be Concise:** Keep answers short."
     },
     {
-        "name":"Acute Apical Periodontitis",
-        "prompt":"### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Acute Apical Periodontitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **\"High Tooth\" Sensation:** You feel like the tooth is longer or taller than the others. You hit it first when closing your mouth.\n* **Pain on Biting:** Chewing food on that side is impossible due to severe pain.\n* **Percussion Pain:** Tapping on the tooth (vertical percussion) causes sharp, intense pain.\n* **Dull, Continuous Ache:** The area feels heavy or pressurized constantly.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Cold/Heat Sensation:** The tooth does NOT react to temperature (the nerve is likely dead).\n* **NO Visible Swelling:** Your face is not swollen (this distinguishes it from an Acute Abscess).\n* **NO Fistula:** There is no bump or pus draining on the gum (distinguishes from Chronic).\n* **NO Relief from Cold:** Cold water does not help.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Say \"it feels like I'm biting on a nail\" or \"the tooth feels loose/long\".\n2. **Be Protective:** You are afraid to close your mouth fully because it hurts to touch the tooth.\n3. **Refuse Irrelevance:** If asked about irrelevant topics, say: \"I can't focus on that, my tooth hurts when I close my mouth.\"\n4. **Be Concise:** Keep answers short."
+        "name": "Acute Apical Periodontitis",
+        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Acute Apical Periodontitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **\"High Tooth\" Sensation:** You feel like the tooth is longer or taller than the others. You hit it first when closing your mouth.\n* **Pain on Biting:** Chewing food on that side is impossible due to severe pain.\n* **Percussion Pain:** Tapping on the tooth (vertical percussion) causes sharp, intense pain.\n* **Dull, Continuous Ache:** The area feels heavy or pressurized constantly.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Cold/Heat Sensation:** The tooth does NOT react to temperature (the nerve is likely dead).\n* **NO Visible Swelling:** Your face is not swollen (this distinguishes it from an Acute Abscess).\n* **NO Fistula:** There is no bump or pus draining on the gum (distinguishes from Chronic).\n* **NO Relief from Cold:** Cold water does not help.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Say \"it feels like I'm biting on a nail\" or \"the tooth feels loose/long\".\n2. **Be Protective:** You are afraid to close your mouth fully because it hurts to touch the tooth.\n3. **Refuse Irrelevance:** If asked about irrelevant topics, say: \"I can't focus on that, my tooth hurts when I close my mouth.\"\n4. **Be Concise:** Keep answers short."
     }
 ]
 
@@ -89,8 +90,9 @@ with app.app_context():
     db.session.commit()
     print("Database initialized and seeded.")
 
-
+# GLOBAL VARIABLES TO MANAGE STATE (Simple Memory)
 conversation_history = []
+current_active_disease = None  # Store the current disease object here
 
 @app.post("/auth/login")
 def login():
@@ -116,12 +118,17 @@ def health():
 @app.post("/chat/start/random")
 def start_random_chat():
     global conversation_history
+    global current_active_disease
 
     disease = Disease.query.order_by(func.random()).first()
 
     if not disease:
         return jsonify({"ok": False, "error": "Nu există boli în baza de date."}), 404
 
+    # 1. Store the active disease
+    current_active_disease = disease
+
+    # 2. Reset history
     conversation_history = [
         {"role": "system", "content": disease.system_prompt}
     ]
@@ -133,6 +140,41 @@ def start_random_chat():
         "disease_id": disease.id,
         "name": disease.name,
         "system_prompt": disease.system_prompt
+    })
+
+
+@app.post("/chat/diagnose")
+def check_diagnosis():
+    global current_active_disease
+
+    data = request.get_json() or {}
+    student_diagnosis = (data.get("diagnosis") or "").strip()
+
+    if not current_active_disease:
+        return jsonify({"error": "No active case found. Please start a simulation first."}), 400
+
+    if not student_diagnosis:
+        return jsonify({"error": "Diagnosis cannot be empty."}), 400
+
+    # Normalization for comparison
+    correct_name = current_active_disease.name.lower()
+    student_input = student_diagnosis.lower()
+
+    # LOGIC: Check if the correct disease name is contained in the student's answer
+    # This allows students to write sentences like "I think it is Reversible Pulpitis"
+    # Or exact match if you want to be stricter.
+    is_correct = correct_name in student_input
+
+    # Prepare feedback
+    if is_correct:
+        message = f"Congratulations! Your diagnosis '{current_active_disease.name}' is correct."
+    else:
+        message = f"Incorrect. The correct diagnosis was '{current_active_disease.name}'. Keep studying!"
+
+    return jsonify({
+        "correct": is_correct,
+        "message": message,
+        "correct_diagnosis": current_active_disease.name
     })
 
 
