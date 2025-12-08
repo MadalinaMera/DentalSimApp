@@ -25,7 +25,7 @@ const MainTabs: React.FC = () => {
         <Route path="/tabs/profile" component={ProfileTab} exact />
       </IonRouterOutlet>
 
-      <IonTabBar slot="bottom" className="dentsim-tab-bar">
+      <IonTabBar slot="bottom" className="dentsim-tab-bar" translucent={false}>
         <IonTabButton tab="home" href="/tabs/home">
           <IonIcon icon={home} />
           <IonLabel>Home</IonLabel>

@@ -46,8 +46,13 @@ class User(db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     xp = db.Column(db.Integer, default=0)
     classroom_id = db.Column(db.Integer, db.ForeignKey('classroom.id'), nullable=True)
+
     streak = db.Column(db.Integer, default=0)
     last_active_date = db.Column(db.Date, nullable=True)
+
+    # --- NEW: ROLE COLUMN ---
+    role = db.Column(db.String(50), default='Dental Student')
+    # ------------------------
 
     badges = db.relationship('UserBadge', backref='user', lazy=True)
     sessions = db.relationship('ChatSession', backref='user', lazy=True)
@@ -114,6 +119,9 @@ def register():
     password = data.get("password", "")
     class_code = data.get("class_code", "").strip()
 
+    # NEW: Get role from request, default to 'Dental Student' if missing
+    role = data.get("role", "Dental Student").strip()
+
     if not username or not password:
         return jsonify({"error": "Username and password required"}), 400
 
@@ -127,15 +135,15 @@ def register():
             assigned_class_id = classroom.id
 
     new_user = User(
-        username=username, 
+        username=username,
         password_hash=generate_password_hash(password),
-        classroom_id=assigned_class_id
+        classroom_id=assigned_class_id,
+        role=role  # <--- SAVE THE ROLE HERE
     )
     db.session.add(new_user)
     db.session.commit()
 
     return jsonify({"message": "User created", "username": username}), 201
-
 @app.route("/auth/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -327,6 +335,7 @@ def get_profile():
     rank = User.query.filter(User.xp > user.xp).count() + 1
     return jsonify({
         "username": user.username,
+        "role": user.role,
         "xp": user.xp,
         "cases_completed": total_cases,
         "accuracy": accuracy,
@@ -354,6 +363,51 @@ def get_leaderboard():
         })
 
     return jsonify(leaderboard_data)
+
+# Update Profile (Username & Role)
+@app.route("/auth/update-profile", methods=["PUT"])
+@jwt_required()
+def update_profile():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    data = request.get_json()
+
+    new_username = data.get("username", "").strip()
+    new_role = data.get("role", "").strip()
+
+    if new_username:
+        # Check if taken (unless it's their own)
+        existing = User.query.filter_by(username=new_username).first()
+        if existing and existing.id != user.id:
+            return jsonify({"error": "Username already taken"}), 409
+        user.username = new_username
+
+    if new_role:
+        user.role = new_role
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated successfully"})
+
+# Change Password
+@app.route("/auth/change-password", methods=["PUT"])
+@jwt_required()
+def change_password():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    data = request.get_json()
+
+    current_pw = data.get("current_password", "")
+    new_pw = data.get("new_password", "")
+
+    if not check_password_hash(user.password_hash, current_pw):
+        return jsonify({"error": "Current password incorrect"}), 401
+
+    if len(new_pw) < 4:
+        return jsonify({"error": "New password too short"}), 400
+
+    user.password_hash = generate_password_hash(new_pw)
+    db.session.commit()
+    return jsonify({"message": "Password changed successfully"})
 
 # --- INITIALIZATION ---
 if __name__ == "__main__":

@@ -318,54 +318,67 @@ const mockClasses: ClassItem[] = [
 ];
 
 const mockDiagnosisOptions: DiagnosisOption[] = [
-  {
-    id: 'reversible-pulpitis',
-    name: 'Reversible Pulpitis',
-    description: 'Inflammation of the pulp that can heal if the cause is removed',
-    category: 'Pulpal',
-  },
-  {
-    id: 'irreversible-pulpitis',
-    name: 'Irreversible Pulpitis with Periapical Abscess',
-    description: 'Severe pulp inflammation with periapical involvement requiring treatment',
-    category: 'Pulpal',
-  },
-  {
-    id: 'pulp-necrosis',
-    name: 'Pulp Necrosis',
-    description: 'Death of the pulp tissue',
-    category: 'Pulpal',
-  },
-  {
-    id: 'chronic-periodontitis',
-    name: 'Chronic Periodontitis',
-    description: 'Progressive loss of alveolar bone with periodontal pocket formation',
-    category: 'Periodontal',
-  },
-  {
-    id: 'periapical-abscess',
-    name: 'Acute Periapical Abscess',
-    description: 'Localized collection of pus in the periapical region',
-    category: 'Periapical',
-  },
-  {
-    id: 'cracked-tooth',
-    name: 'Cracked Tooth Syndrome',
-    description: 'Incomplete fracture of a vital posterior tooth',
-    category: 'Structural',
-  },
-  {
-    id: 'dentinal-hypersensitivity',
-    name: 'Dentinal Hypersensitivity',
-    description: 'Pain from exposed dentin in response to stimuli',
-    category: 'Other',
-  },
-  {
-    id: 'acute-gingivitis',
-    name: 'Acute Gingivitis',
-    description: 'Inflammation of the gingiva without attachment loss',
-    category: 'Periodontal',
-  },
+    // --- Pulpal Diagnoses ---
+    {
+        id: 'acute-total-pulpitis',
+        name: 'Acute Total Pulpitis',
+        description: 'Generalized, severe inflammation involving the entire pulp tissue',
+        category: 'Pulpal',
+    },
+    {
+        id: 'irreversible-pulpitis',
+        name: 'Irreversible Pulpitis',
+        description: 'Vital pulp that is inflamed and incapable of healing',
+        category: 'Pulpal',
+    },
+    {
+        id: 'reversible-pulpitis',
+        name: 'Reversible Pulpitis',
+        description: 'Inflammation of the pulp that can heal if the cause is removed',
+        category: 'Pulpal',
+    },
+    {
+        id: 'pulp-necrosis',
+        name: 'Pulp Necrosis',
+        description: 'Complete death of the pulp tissue, often following irreversible pulpitis',
+        category: 'Pulpal',
+    },
+
+    // --- Periapical Diagnoses ---
+    {
+        id: 'acute-apical-periodontitis',
+        name: 'Acute Apical Periodontitis',
+        description: 'Painful inflammation around the apex of the tooth, causing tenderness to biting',
+        category: 'Periapical',
+    },
+    {
+        id: 'chronic-apical-periodontitis',
+        name: 'Chronic Apical Periodontitis',
+        description: 'Long-standing inflammation at the apex of a non-vital tooth, usually appearing as a radiolucency',
+        category: 'Periapical',
+    },
+
+    // --- Periodontal / Soft Tissue Diagnoses ---
+    {
+        id: 'periodontal-abscess',
+        name: 'Periodontal Abscess',
+        description: 'Localized purulent infection within the tissues adjacent to the periodontal pocket',
+        category: 'Periodontal',
+    },
+    {
+        id: 'pericoronitis',
+        name: 'Pericoronitis',
+        description: 'Inflammation of the soft tissues surrounding the crown of a partially erupted tooth',
+        category: 'Periodontal',
+    },
+
+    // --- Structural / Hard Tissue Diagnoses ---
+    {
+        id: 'simple-caries',
+        name: 'Simple Caries',
+        description: 'Demineralization of tooth structure caused by bacterial acids affecting enamel/dentin',
+        category: 'Structural',
+    },
 ];
 
 // Service Functions

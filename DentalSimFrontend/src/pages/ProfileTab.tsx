@@ -44,6 +44,8 @@ const ProfileTab: React.FC = () => {
         earnedAt: undefined
     }));
 
+    const role = userProfile?.role || 'Dental Student';
+
     const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
     const [showBadgeModal, setShowBadgeModal] = useState(false);
     const [badgeFilter, setBadgeFilter] = useState<string>('all');
@@ -116,14 +118,14 @@ const ProfileTab: React.FC = () => {
                 <IonToolbar className="dentsim-toolbar">
                     <IonTitle className="text-center font-bold text-xl">Profile</IonTitle>
                     <IonButtons slot="end">
-                        <IonButton className="text-gray-600" onClick={() => setShowLogoutAlert(true)}>
-                            <IonIcon icon={logOutOutline} slot="icon-only" />
+                        <IonButton className="text-gray-600" onClick={() => history.push('/settings')}>
+                            <IonIcon icon={settingsOutline} slot="icon-only" />
                         </IonButton>
                     </IonButtons>
                 </IonToolbar>
             </IonHeader>
 
-            <IonContent fullscreen className="dentsim-content">
+            <IonContent className="dentsim-content">
                 {/* Profile Header */}
                 <div className="bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 pt-6 pb-12 px-4">
                     <div className="flex flex-col items-center">
@@ -134,7 +136,7 @@ const ProfileTab: React.FC = () => {
                         </IonAvatar>
 
                         <h2 className="text-white text-xl font-bold capitalize">{username}</h2>
-                        <p className="text-indigo-100 text-sm">Dental Student</p>
+                        <p className="text-indigo-100 text-sm opacity-90">{role}</p>
 
                         <div className="flex items-center gap-2 mt-3 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full">
                             <IonIcon icon={ribbonOutline} className="text-white" />
@@ -242,7 +244,7 @@ const ProfileTab: React.FC = () => {
                             Sign Out
                         </IonButton>
                         <p className="text-center text-xs text-gray-400 mt-4">
-                            DentSim v1.0.0 • Built for Dental Students
+                            DentalSim v1.0.0 • Built for Dental Students
                         </p>
                     </div>
 
@@ -284,7 +286,7 @@ const ProfileTab: React.FC = () => {
                     isOpen={showLogoutAlert}
                     onDidDismiss={() => setShowLogoutAlert(false)}
                     header="Sign Out"
-                    message="Are you sure you want to log out?"
+                    message="Are you sure you want to sign out?"
                     buttons={[
                         {
                             text: 'Cancel',

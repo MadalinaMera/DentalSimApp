@@ -8,11 +8,10 @@ import {
     IonIcon,
     IonSpinner,
     IonText,
+    IonToast,
 } from '@ionic/react';
 import { mailOutline, lockClosedOutline, logoGoogle, logoApple } from 'ionicons/icons';
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error
 import logoImg from '../assets/NoBackground.png';
 
 const LoginPage: React.FC = () => {
@@ -21,9 +20,9 @@ const LoginPage: React.FC = () => {
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
+    const [showToast, setShowToast] = useState(false);
 
     const handleLogin = async () => {
-        // 1. Basic Validation
         if (!email || !password) {
             setError('Please enter both username/email and password.');
             return;
@@ -33,13 +32,11 @@ const LoginPage: React.FC = () => {
         setIsLoading(true);
 
         try {
-            // 2. The Real Backend Call
             const response = await fetch('http://localhost:8000/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                // Backend expects 'username', so we send our 'email' state as the username
                 body: JSON.stringify({
                     username: email,
                     password: password
@@ -49,21 +46,19 @@ const LoginPage: React.FC = () => {
             const data = await response.json();
 
             if (!response.ok) {
-                // Handle errors (e.g. "Invalid credentials" from app.py)
                 throw new Error(data.error || 'Login failed');
             }
 
-            // 3. Success! Store the data
-            // app.py returns: { token: "...", user: { username: "...", xp: 0... } }
             localStorage.setItem('token', data.token);
             localStorage.setItem('user', JSON.stringify(data.user));
 
-            console.log('Login successful:', data.user);
+            setShowToast(true);
 
-            // 4. Navigate to Home
-            history.replace('/tabs/home');
+            setTimeout(() => {
+                history.replace('/tabs/home');
+            }, 500);
 
-        } catch (err) {
+        } catch (err: any) {
             setError(err.message || 'Unable to connect to server');
         } finally {
             setIsLoading(false);
@@ -78,13 +73,14 @@ const LoginPage: React.FC = () => {
     return (
         <IonPage>
             <IonContent fullscreen className="login-content">
-                <div className="h-full flex flex-col justify-center px-6 py-12">
+                <div className="min-h-full flex flex-col justify-center px-6 pt-safe pt-12 pb-12">
+
                     {/* Logo & Title */}
-                    <div className="flex flex-col items-center mb-10">
+                    <div className="flex flex-col items-center mb-8">
                         <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-xl mb-4 overflow-hidden">
                             <img
                                 src={logoImg}
-                                alt="DentalSim Logo"
+                                alt="DentSim Logo"
                                 className="w-20 h-20 object-contain"
                                 onError={(e) => {
                                     (e.target as HTMLImageElement).style.display = 'none';
@@ -94,7 +90,7 @@ const LoginPage: React.FC = () => {
                             />
                         </div>
                         <h1 className="text-3xl font-bold text-gray-800">DentSim</h1>
-                        <p className="text-gray-500 mt-2 text-center">
+                        <p className="text-gray-500 mt-2 text-center text-sm">
                             Master dental diagnosis through AI-powered practice
                         </p>
                     </div>
@@ -102,7 +98,7 @@ const LoginPage: React.FC = () => {
                     {/* Login Form */}
                     <div className="bg-white rounded-3xl shadow-lg p-6 mb-6">
                         <div className="space-y-4">
-                            {/* Email Input */}
+
                             <div className="login-input-group">
                                 <div className="flex items-center bg-gray-100 rounded-2xl px-4 py-1">
                                     <IonIcon
@@ -110,7 +106,7 @@ const LoginPage: React.FC = () => {
                                         className="text-gray-400 text-xl mr-3"
                                     />
                                     <IonInput
-                                        type="text" // Changed from email to text since app.py expects username
+                                        type="text"
                                         placeholder="Username or Email"
                                         value={email}
                                         onIonInput={(e) => setEmail(e.detail.value || '')}
@@ -119,7 +115,6 @@ const LoginPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Password Input */}
                             <div className="login-input-group">
                                 <div className="flex items-center bg-gray-100 rounded-2xl px-4 py-1">
                                     <IonIcon
@@ -136,7 +131,6 @@ const LoginPage: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Error Message Display */}
                             {error && (
                                 <div className="text-center">
                                     <IonText color="danger" className="text-sm font-medium">
@@ -145,14 +139,12 @@ const LoginPage: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* Forgot Password */}
                             <div className="text-right">
                                 <button className="text-indigo-600 text-sm font-medium">
                                     Forgot password?
                                 </button>
                             </div>
 
-                            {/* Login Button */}
                             <IonButton
                                 expand="block"
                                 className="login-button mt-4"
@@ -174,7 +166,7 @@ const LoginPage: React.FC = () => {
                         <div className="flex-1 h-px bg-gray-200" />
                     </div>
 
-                    {/* Social Login Buttons */}
+                    {/* Social Buttons */}
                     <div className="flex gap-4 mb-8">
                         <IonButton
                             expand="block"
@@ -200,10 +192,7 @@ const LoginPage: React.FC = () => {
                     <div className="text-center">
                         <p className="text-gray-500">
                             Don't have an account?{' '}
-                            <button
-                                className="text-indigo-600 font-semibold"
-                                onClick={() => history.replace('/signup')}
-                            >
+                            <button className="text-indigo-600 font-semibold" onClick={() => history.push('/signup')}>
                                 Sign Up
                             </button>
                         </p>
@@ -220,6 +209,15 @@ const LoginPage: React.FC = () => {
                         </IonButton>
                     </div>
                 </div>
+
+                <IonToast
+                    isOpen={showToast}
+                    onDidDismiss={() => setShowToast(false)}
+                    message="Welcome back!"
+                    duration={1500}
+                    color="success"
+                    position="top"
+                />
             </IonContent>
         </IonPage>
     );

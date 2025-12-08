@@ -26,6 +26,7 @@ import MainTabs from './pages/MainTabs';
 import DiagnosisPage from './pages/DiagnosisPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from "./pages/SignupPage";
+import SettingsPage from "./pages/SettingsPage";
 
 setupIonicReact({
   mode: 'ios', // Consistent iOS-like transitions across platforms
@@ -41,6 +42,7 @@ const App: React.FC = () => {
             <Route path="/signup" component={SignupPage} exact />
             <Route path="/tabs" component={MainTabs} />
             <Route path="/diagnosis/:caseId?" component={DiagnosisPage} exact />
+            <Route path="/settings" component={SettingsPage} exact />
             <Redirect exact from="/" to="/login" />
         </IonRouterOutlet>
       </IonReactRouter>
