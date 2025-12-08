@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useHistory } from 'react-router-dom'; // <--- 1. Import useHistory
 import {
     IonPage,
     IonHeader,
@@ -13,6 +14,7 @@ import {
     IonSegment,
     IonSegmentButton,
     useIonViewWillEnter,
+    IonAlert, // <--- 2. Import IonAlert for confirmation
 } from '@ionic/react';
 import {
     settingsOutline,
@@ -23,6 +25,7 @@ import {
     medkit,
     checkmarkCircle,
     calendar,
+    logOutOutline, // <--- 3. Import Logout Icon
 } from 'ionicons/icons';
 import {
     getAllBadges,
@@ -31,17 +34,20 @@ import {
 import BadgeComponent, { BadgeDetail } from '../components/BadgeComponent';
 
 const ProfileTab: React.FC = () => {
-    // State for real user data
+    const history = useHistory(); // <--- 4. Initialize History
     const [userProfile, setUserProfile] = useState<any>(null);
     const [earnedBadges, setEarnedBadges] = useState<Badge[]>([]);
+    const [showLogoutAlert, setShowLogoutAlert] = useState(false); // <--- 5. State for alert
 
-    const allBadges = getAllBadges(); // Get generic badge definitions (icons, desc)
+    const allBadges = getAllBadges().map(b => ({
+        ...b,
+        earnedAt: undefined
+    }));
 
     const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
     const [showBadgeModal, setShowBadgeModal] = useState(false);
     const [badgeFilter, setBadgeFilter] = useState<string>('all');
 
-    // Fetch Data on Enter
     useIonViewWillEnter(() => {
         fetchProfile();
     });
@@ -59,13 +65,12 @@ const ProfileTab: React.FC = () => {
                 const data = await response.json();
                 setUserProfile(data);
 
-                // Map the "Names" from DB to full "Badge Objects" from Service
                 const earned = allBadges.filter(b =>
-                    data.earned_badges.includes(b.name) || // Check by name match
-                    data.earned_badges.includes(b.id)      // Or ID match (depending on how you saved it)
+                    data.earned_badges.includes(b.name) ||
+                    data.earned_badges.includes(b.id)
                 ).map(b => ({
                     ...b,
-                    earnedAt: new Date() // We don't store exact date in this simple DB model yet, so just mark as earned
+                    earnedAt: new Date()
                 }));
 
                 setEarnedBadges(earned);
@@ -75,27 +80,35 @@ const ProfileTab: React.FC = () => {
         }
     };
 
+    // --- LOGOUT LOGIC ---
+    const handleLogout = () => {
+        // 1. Clear the keys that keep us logged in
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+
+        // 2. Redirect to Login (replace history so they can't go back)
+        history.replace('/login');
+    };
+    // --------------------
+
     const handleBadgeClick = (badge: Badge) => {
         setSelectedBadge(badge);
         setShowBadgeModal(true);
     };
 
-    // Filter Logic
     const filteredBadges = badgeFilter === 'earned'
         ? earnedBadges
         : badgeFilter === 'locked'
             ? allBadges.filter(b => !earnedBadges.find(eb => eb.id === b.id))
             : allBadges.map(b => {
-                // If earned, use the earned version (has date), else use locked version
                 const isEarned = earnedBadges.find(eb => eb.id === b.id);
                 return isEarned ? isEarned : b;
             });
 
-    // Display Helpers
     const username = userProfile?.username || 'Guest';
     const initial = username.charAt(0).toUpperCase();
     const xp = userProfile?.xp || 0;
-    const level = Math.floor(xp / 1000) + 1; // Calculate level from Real XP
+    const level = Math.floor(xp / 1000) + 1;
 
     return (
         <IonPage>
@@ -103,8 +116,8 @@ const ProfileTab: React.FC = () => {
                 <IonToolbar className="dentsim-toolbar">
                     <IonTitle className="text-center font-bold text-xl">Profile</IonTitle>
                     <IonButtons slot="end">
-                        <IonButton className="text-gray-600">
-                            <IonIcon icon={settingsOutline} slot="icon-only" />
+                        <IonButton className="text-gray-600" onClick={() => setShowLogoutAlert(true)}>
+                            <IonIcon icon={logOutOutline} slot="icon-only" />
                         </IonButton>
                     </IonButtons>
                 </IonToolbar>
@@ -114,19 +127,15 @@ const ProfileTab: React.FC = () => {
                 {/* Profile Header */}
                 <div className="bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 pt-6 pb-12 px-4">
                     <div className="flex flex-col items-center">
-                        {/* Avatar */}
                         <IonAvatar className="w-24 h-24 ring-4 ring-white/30 shadow-xl mb-4 overflow-hidden">
                             <div className="w-full h-full bg-indigo-400 flex items-center justify-center text-white font-bold text-4xl rounded-full">
                                 {initial}
                             </div>
                         </IonAvatar>
 
-                        {/* Name */}
                         <h2 className="text-white text-xl font-bold capitalize">{username}</h2>
-                        {/* Role - ori il facem dinamic, ori il scoatem*/}
                         <p className="text-indigo-100 text-sm">Dental Student</p>
 
-                        {/* Level Badge */}
                         <div className="flex items-center gap-2 mt-3 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full">
                             <IonIcon icon={ribbonOutline} className="text-white" />
                             <span className="text-white font-semibold">
@@ -140,7 +149,7 @@ const ProfileTab: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Stats Cards - REAL DATA */}
+                {/* Stats Cards */}
                 <div className="px-4 -mt-6">
                     <div className="bg-white rounded-2xl shadow-lg p-4">
                         <div className="grid grid-cols-4 gap-2">
@@ -172,49 +181,14 @@ const ProfileTab: React.FC = () => {
                                 <p className="text-xs text-gray-500">Cases</p>
                             </div>
 
-                            {/*rank*/}
                             <div className="text-center p-2">
                                 <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center mx-auto mb-2">
                                     <IonIcon icon={trophy} className="text-purple-500 text-xl" />
                                 </div>
                                 <p className="text-lg font-bold text-gray-800">
-                                    {/* Show Rank if it exists, otherwise '--' */}
                                     #{userProfile?.rank || '--'}
                                 </p>
                                 <p className="text-xs text-gray-500">Rank</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Additional Stats */}
-                <div className="px-4 mt-4">
-                    <div className="bg-gray-50 rounded-2xl p-4">
-                        <div className="flex items-center justify-between mb-4">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-amber-100 rounded-xl flex items-center justify-center">
-                                    <IonIcon icon={calendar} className="text-amber-600 text-xl" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-gray-500">Last Active</p>
-                                    <p className="font-semibold text-gray-800">
-                                        {userProfile?.last_active_date || 'Never'}
-                                    </p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-                                    <IonIcon icon={statsChartOutline} className="text-indigo-600 text-xl" />
-                                </div>
-                                <div>
-                                    <p className="text-sm text-gray-500">Total XP Earned</p>
-                                    <p className="font-semibold text-gray-800">
-                                        {xp.toLocaleString()} XP
-                                    </p>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -244,16 +218,34 @@ const ProfileTab: React.FC = () => {
                         </IonSegmentButton>
                     </IonSegment>
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-3 gap-3 mb-8">
                         {filteredBadges.map((badge) => (
                             <BadgeComponent
                                 key={badge.id}
-                                badge={badge} // This badge object now knows if it is earned!
+                                badge={badge}
                                 size="medium"
                                 onClick={handleBadgeClick}
                             />
                         ))}
                     </div>
+
+                    {/* --- BIG LOGOUT BUTTON --- */}
+                    <div className="mt-8 mb-8">
+                        <IonButton
+                            expand="block"
+                            color="danger"
+                            fill="outline"
+                            className="font-bold"
+                            onClick={() => setShowLogoutAlert(true)}
+                        >
+                            <IonIcon icon={logOutOutline} slot="start" />
+                            Sign Out
+                        </IonButton>
+                        <p className="text-center text-xs text-gray-400 mt-4">
+                            DentSim v1.0.0 • Built for Dental Students
+                        </p>
+                    </div>
+
                 </div>
 
                 {/* Badge Detail Modal */}
@@ -286,6 +278,25 @@ const ProfileTab: React.FC = () => {
                         )}
                     </IonContent>
                 </IonModal>
+
+                {/* --- LOGOUT CONFIRMATION ALERT --- */}
+                <IonAlert
+                    isOpen={showLogoutAlert}
+                    onDidDismiss={() => setShowLogoutAlert(false)}
+                    header="Sign Out"
+                    message="Are you sure you want to log out?"
+                    buttons={[
+                        {
+                            text: 'Cancel',
+                            role: 'cancel',
+                        },
+                        {
+                            text: 'Sign Out',
+                            role: 'destructive',
+                            handler: handleLogout, // Calls our logout function
+                        },
+                    ]}
+                />
             </IonContent>
         </IonPage>
     );
