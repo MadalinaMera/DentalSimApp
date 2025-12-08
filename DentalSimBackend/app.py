@@ -312,28 +312,48 @@ def get_profile():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # 1. Calculate Stats
-    # Filter only sessions that are actually finished
+    # Calculate Stats
     completed_sessions = [s for s in user.sessions if s.is_completed]
     total_cases = len(completed_sessions)
-
-    # Count how many were correct
     correct_cases = len([s for s in completed_sessions if s.was_correct])
 
-    # Calculate percentage (prevent division by zero)
     accuracy = 0
     if total_cases > 0:
         accuracy = int((correct_cases / total_cases) * 100)
 
+    # Get list of earned badge names
+    earned_badge_names = [b.badge_name for b in user.badges]
+
+    rank = User.query.filter(User.xp > user.xp).count() + 1
     return jsonify({
         "username": user.username,
         "xp": user.xp,
-        "badge_count": len(user.badges),
         "cases_completed": total_cases,
         "accuracy": accuracy,
         "streak": user.streak,
-        "last_active_date": user.last_active_date.isoformat() if user.last_active_date else None
+        "last_active_date": user.last_active_date.isoformat() if user.last_active_date else None,
+        "earned_badges": earned_badge_names,
+        "rank": rank
     })
+
+@app.route("/auth/leaderboard", methods=["GET"])
+def get_leaderboard():
+    # Get top 50 users sorted by XP
+    top_users = User.query.order_by(User.xp.desc()).limit(50).all()
+
+    leaderboard_data = []
+    for index, u in enumerate(top_users):
+        leaderboard_data.append({
+            "id": u.id,
+            "username": u.username,
+            "xp": u.xp,
+            "streak": u.streak,
+            "rank": index + 1,
+            # Calculate level just for display (XP / 1000 + 1)
+            "level": int(u.xp / 1000) + 1
+        })
+
+    return jsonify(leaderboard_data)
 
 # --- INITIALIZATION ---
 if __name__ == "__main__":
