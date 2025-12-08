@@ -73,15 +73,15 @@ const LoginPage: React.FC = () => {
     return (
         <IonPage>
             <IonContent fullscreen className="login-content">
-                <div className="min-h-full flex flex-col justify-center px-6 pt-safe pt-12 pb-12">
+                <div className="flex flex-col justify-center px-6 py-12">
 
                     {/* Logo & Title */}
                     <div className="flex flex-col items-center mb-8">
-                        <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-3xl flex items-center justify-center shadow-xl mb-4 overflow-hidden">
+                        <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg mb-4 overflow-hidden">
                             <img
                                 src={logoImg}
                                 alt="DentSim Logo"
-                                className="w-20 h-20 object-contain"
+                                className="w-16 h-16 object-contain"
                                 onError={(e) => {
                                     (e.target as HTMLImageElement).style.display = 'none';
                                     (e.target as HTMLImageElement).parentElement!.innerHTML =
@@ -89,8 +89,8 @@ const LoginPage: React.FC = () => {
                                 }}
                             />
                         </div>
-                        <h1 className="text-3xl font-bold text-gray-800">DentSim</h1>
-                        <p className="text-gray-500 mt-2 text-center text-sm">
+                        <h1 className="text-2xl font-bold text-gray-800">DentSim</h1>
+                        <p className="text-gray-500 text-sm mt-1">
                             Master dental diagnosis through AI-powered practice
                         </p>
                     </div>

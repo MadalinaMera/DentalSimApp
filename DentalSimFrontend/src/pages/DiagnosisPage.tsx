@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useHistory, useParams } from 'react-router-dom';
 import {
     IonPage,
@@ -26,13 +26,12 @@ import {
     send,
     medkit,
     time,
-    helpCircle,
-    checkmarkCircle,
-    closeCircle,
     clipboard,
     search,
     pulse,
     eyedrop,
+    checkmarkCircle,
+    closeCircle,
 } from 'ionicons/icons';
 import { getDiagnosisOptions } from '../services/BadgeService';
 
@@ -49,7 +48,7 @@ interface RouteParams {
 
 const DiagnosisPage: React.FC = () => {
     const history = useHistory();
-    const { caseId } = useParams<RouteParams>(); // This is our SESSION ID
+    const { caseId } = useParams<RouteParams>();
     const contentRef = useRef<HTMLIonContentElement>(null);
 
     // Timer state
@@ -69,13 +68,14 @@ const DiagnosisPage: React.FC = () => {
     const [isAITyping, setIsAITyping] = useState(false);
     const [error, setError] = useState('');
 
-    // Diagnosis modal state
+    // Modal & Alert state
     const [showDiagnosisModal, setShowDiagnosisModal] = useState(false);
     const [selectedDiagnosisId, setSelectedDiagnosisId] = useState<string>('');
     const [showConfirmAlert, setShowConfirmAlert] = useState(false);
+    const [showExitAlert, setShowExitAlert] = useState(false);
     const [showResultModal, setShowResultModal] = useState(false);
     const [isSubmittingDiagnosis, setIsSubmittingDiagnosis] = useState(false);
-    const [showExitAlert, setShowExitAlert] = useState(false);
+
     // Result state
     const [diagnosisResult, setDiagnosisResult] = useState<{
         correct: boolean;
@@ -121,13 +121,11 @@ const DiagnosisPage: React.FC = () => {
         setShowDiagnosisModal(true);
     };
 
-    // --- 1. CHAT INTEGRATION ---
     const handleSendMessage = async () => {
         if (!inputText.trim() || isAITyping) return;
 
         const userMsgText = inputText.trim();
 
-        // Add User Message Locally
         const newMessage: Message = {
             id: Date.now().toString(),
             type: 'student',
@@ -143,7 +141,6 @@ const DiagnosisPage: React.FC = () => {
             const token = localStorage.getItem('token');
             if (!token || !caseId) throw new Error("Session invalid");
 
-            // Send to Backend
             const response = await fetch('http://localhost:8000/chat', {
                 method: 'POST',
                 headers: {
@@ -160,11 +157,10 @@ const DiagnosisPage: React.FC = () => {
 
             if (!response.ok) throw new Error(data.error || 'Failed to send');
 
-            // Add AI Response
             const aiMessage: Message = {
                 id: (Date.now() + 1).toString(),
                 type: 'patient',
-                content: data.reply, // The text from the LLM
+                content: data.reply,
                 timestamp: new Date(),
             };
             setMessages((prev) => [...prev, aiMessage]);
@@ -177,13 +173,11 @@ const DiagnosisPage: React.FC = () => {
         }
     };
 
-    // --- 2. DIAGNOSIS INTEGRATION ---
     const confirmDiagnosis = async () => {
         setIsTimerPaused(true);
         setIsSubmittingDiagnosis(true);
 
         try {
-            // Find the Name of the diagnosis from the ID
             const selectedOption = diagnosisOptions.find(d => d.id === selectedDiagnosisId);
             if (!selectedOption) return;
 
@@ -197,7 +191,7 @@ const DiagnosisPage: React.FC = () => {
                 },
                 body: JSON.stringify({
                     session_id: caseId,
-                    diagnosis: selectedOption.name // Send "Reversible Pulpitis" etc.
+                    diagnosis: selectedOption.name
                 })
             });
 
@@ -214,13 +208,12 @@ const DiagnosisPage: React.FC = () => {
 
         } catch (err) {
             setError("Failed to submit diagnosis");
-            setIsTimerPaused(false); // Resume if failed
+            setIsTimerPaused(false);
         } finally {
             setIsSubmittingDiagnosis(false);
         }
     };
 
-    // --- Tool Actions (Mock for now, kept local) ---
     const handleToolAction = (tool: string) => {
         setShowToolsMenu(false);
         const toolMessages: Record<string, string> = {
@@ -241,7 +234,7 @@ const DiagnosisPage: React.FC = () => {
 
     return (
         <IonPage className="diagnosis-page">
-            <IonHeader className="ion-no-border">
+            <IonHeader className="ion-no-border" translucent={false}>
                 <IonToolbar className="diagnosis-toolbar">
                     <IonButtons slot="start">
                         <IonButton onClick={() => setShowExitAlert(true)} color="medium">
@@ -266,31 +259,22 @@ const DiagnosisPage: React.FC = () => {
                     </IonButtons>
                 </IonToolbar>
 
-                {/* Clinician Toolbar */}
                 <div className="clinician-toolbar bg-gray-50 border-b border-gray-200">
                     <div className="flex items-center justify-around py-2 px-4">
                         <button onClick={() => handleToolAction('examine')} className="flex flex-col items-center gap-1 p-2">
-                            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                                <IonIcon icon={search} className="text-blue-600" />
-                            </div>
+                            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center"><IonIcon icon={search} className="text-blue-600" /></div>
                             <span className="text-[10px] text-gray-600">Examine</span>
                         </button>
                         <button onClick={() => handleToolAction('percussion')} className="flex flex-col items-center gap-1 p-2">
-                            <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center">
-                                <IonIcon icon={pulse} className="text-orange-600" />
-                            </div>
+                            <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center"><IonIcon icon={pulse} className="text-orange-600" /></div>
                             <span className="text-[10px] text-gray-600">Tap</span>
                         </button>
                         <button onClick={() => handleToolAction('thermal')} className="flex flex-col items-center gap-1 p-2">
-                            <div className="w-8 h-8 bg-cyan-100 rounded-lg flex items-center justify-center">
-                                <IonIcon icon={eyedrop} className="text-cyan-600" />
-                            </div>
+                            <div className="w-8 h-8 bg-cyan-100 rounded-lg flex items-center justify-center"><IonIcon icon={eyedrop} className="text-cyan-600" /></div>
                             <span className="text-[10px] text-gray-600">Cold</span>
                         </button>
                         <button onClick={() => handleToolAction('xray')} className="flex flex-col items-center gap-1 p-2">
-                            <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center">
-                                <IonIcon icon={medkit} className="text-purple-600" />
-                            </div>
+                            <div className="w-8 h-8 bg-purple-100 rounded-lg flex items-center justify-center"><IonIcon icon={medkit} className="text-purple-600" /></div>
                             <span className="text-[10px] text-gray-600">X-Ray</span>
                         </button>
                     </div>
@@ -317,7 +301,6 @@ const DiagnosisPage: React.FC = () => {
                             )}
                         </div>
                     ))}
-
                     {isAITyping && (
                         <div className="flex justify-start">
                             <div className="chat-bubble-patient">
@@ -328,8 +311,8 @@ const DiagnosisPage: React.FC = () => {
                 </div>
             </IonContent>
 
-            <IonFooter className="chat-footer ion-no-border">
-                <div className="flex items-end gap-2 p-3 bg-white border-t border-gray-100">
+            <IonFooter className="chat-footer ion-no-border" translucent={false}>
+                <div className="flex items-end gap-2 p-3 pb-safe bg-white border-t border-gray-100">
                     <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2">
                         <IonTextarea
                             value={inputText}
@@ -339,10 +322,9 @@ const DiagnosisPage: React.FC = () => {
                             enterkeyhint="send"
                             onIonInput={(e) => setInputText(e.detail.value || '')}
                             onKeyDown={(e) => {
-                                // If Enter is pressed WITHOUT Shift (Shift+Enter = new line)
                                 if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault(); // Stop it from adding a new line
-                                    handleSendMessage(); // Send the message!
+                                    e.preventDefault();
+                                    handleSendMessage();
                                 }
                             }}
                             className="chat-input"
@@ -358,7 +340,6 @@ const DiagnosisPage: React.FC = () => {
                 </div>
             </IonFooter>
 
-            {/* Diagnosis Selection Modal */}
             <IonModal isOpen={showDiagnosisModal} onDidDismiss={() => setShowDiagnosisModal(false)} className="diagnosis-modal">
                 <IonHeader>
                     <IonToolbar>
@@ -376,7 +357,13 @@ const DiagnosisPage: React.FC = () => {
                         <IonRadioGroup value={selectedDiagnosisId} onIonChange={(e) => setSelectedDiagnosisId(e.detail.value)}>
                             <IonList>
                                 {diagnosisOptions.map((option) => (
-                                    <IonItem key={option.id}>
+                                    <IonItem
+                                        key={option.id}
+                                        button={true}
+                                        detail={false} // <--- FIX: Hides the arrow, keeps the click!
+                                        onClick={() => setSelectedDiagnosisId(option.id)}
+                                        className="diagnosis-option"
+                                    >
                                         <IonLabel>
                                             <h3 className="font-bold">{option.name}</h3>
                                             <p className="text-xs text-gray-500">{option.description}</p>
@@ -390,30 +377,28 @@ const DiagnosisPage: React.FC = () => {
                 </IonContent>
             </IonModal>
 
-            {/* Exit/Abort Alert */}
+            <IonAlert
+                isOpen={showConfirmAlert}
+                onDidDismiss={() => setShowConfirmAlert(false)}
+                header="Finalize Diagnosis"
+                message="Are you sure? You cannot change this later."
+                buttons={[
+                    { text: 'Cancel', role: 'cancel' },
+                    { text: 'Submit', handler: confirmDiagnosis }
+                ]}
+            />
+
             <IonAlert
                 isOpen={showExitAlert}
                 onDidDismiss={() => setShowExitAlert(false)}
                 header="Exit Session?"
                 message="If you leave now, you won't get any XP, but your accuracy score won't be affected."
                 buttons={[
-                    {
-                        text: 'Stay',
-                        role: 'cancel',
-                    },
-                    {
-                        text: 'Leave',
-                        role: 'destructive',
-                        handler: () => {
-                            // Just navigate away. The session stays "incomplete" in the DB
-                            // so it won't count against your accuracy stats.
-                            history.replace('/tabs/home');
-                        },
-                    },
+                    { text: 'Stay', role: 'cancel' },
+                    { text: 'Leave', role: 'destructive', handler: handleExit },
                 ]}
             />
 
-            {/* Result Modal */}
             <IonModal isOpen={showResultModal} backdropDismiss={false} className="result-modal">
                 <IonContent>
                     <div className="flex flex-col items-center justify-center min-h-full p-6 text-center">
