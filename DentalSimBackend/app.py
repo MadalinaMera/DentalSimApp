@@ -26,7 +26,7 @@ jwt = JWTManager(app)
 
 # URL for the LLM hosted on Colab/Ngrok
 # IMPORTANT: You must update this URL every time you restart Ngrok in Colab
-COLAB_URL = "https://sharon-preperusal-preobediently.ngrok-free.dev"
+COLAB_URL = "https://adrenergic-maisie-unenlightened.ngrok-free.dev"
 HF_URL = f"{COLAB_URL}/generate"
 HF_HEADERS = {"Content-Type": "application/json"}
 
@@ -174,6 +174,7 @@ def start_random_chat():
     # db.session.add(ChatMessage(session_id=new_session.id, sender="system", content=disease.system_prompt))
     # db.session.commit()
 
+    print("New chat session started:", new_session.id, "Disease:", disease.name)
     return jsonify({
         "ok": True,
         "session_id": new_session.id,
@@ -214,7 +215,7 @@ def chat():
     }
 
     try:
-        response = requests.post(HF_URL, json=payload, headers=HF_HEADERS, timeout=30)
+        response = requests.post(HF_URL, json=payload, headers=HF_HEADERS, timeout=120)
         
         if response.status_code == 200:
             ai_data = response.json()
@@ -278,6 +279,36 @@ def check_diagnosis():
         "message": message,
         "xp_gained": xp_gained,
         "correct_diagnosis": session.disease.name
+    })
+
+@app.route("/auth/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # 1. Calculate Stats
+    # Filter only sessions that are actually finished
+    completed_sessions = [s for s in user.sessions if s.is_completed]
+    total_cases = len(completed_sessions)
+
+    # Count how many were correct
+    correct_cases = len([s for s in completed_sessions if s.was_correct])
+
+    # Calculate percentage (prevent division by zero)
+    accuracy = 0
+    if total_cases > 0:
+        accuracy = int((correct_cases / total_cases) * 100)
+
+    return jsonify({
+        "username": user.username,
+        "xp": user.xp,
+        "badge_count": len(user.badges),
+        "cases_completed": total_cases,
+        "accuracy": accuracy
     })
 
 # --- INITIALIZATION ---
