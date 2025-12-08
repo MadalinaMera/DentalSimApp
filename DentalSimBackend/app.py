@@ -46,7 +46,9 @@ class User(db.Model):
     password_hash = db.Column(db.String(128), nullable=False)
     xp = db.Column(db.Integer, default=0)
     classroom_id = db.Column(db.Integer, db.ForeignKey('classroom.id'), nullable=True)
-    
+    streak = db.Column(db.Integer, default=0)
+    last_active_date = db.Column(db.Date, nullable=True)
+
     badges = db.relationship('UserBadge', backref='user', lazy=True)
     sessions = db.relationship('ChatSession', backref='user', lazy=True)
 
@@ -263,12 +265,32 @@ def check_diagnosis():
                 db.session.add(UserBadge(user_id=current_user_id, badge_name="Speedster"))
                 xp_gained += 50
                 message += " [BADGE UNLOCKED: Speedster]"
-        
-        # Update User XP
-        user = User.query.get(current_user_id)
-        user.xp += xp_gained
     else:
+        xp_gained = 20
         message = f"Incorrect. The correct diagnosis was {session.disease.name}."
+
+
+    # Update User XP
+    user = User.query.get(current_user_id)
+    user.xp += xp_gained
+
+    ## Streak Logic
+    today = datetime.date.today()
+
+    # If this is the first time playing today...
+    if user.last_active_date != today:
+        # Check if they played yesterday
+        yesterday = today - datetime.timedelta(days=1)
+
+        if user.last_active_date == yesterday:
+            # They kept the streak alive!
+            user.streak += 1
+        else:
+            # They missed a day (or are new), reset to 1
+            user.streak = 1
+
+        # Update the last active date to today
+        user.last_active_date = today
 
     session.is_completed = True
     session.end_time = datetime.datetime.utcnow()
@@ -308,7 +330,9 @@ def get_profile():
         "xp": user.xp,
         "badge_count": len(user.badges),
         "cases_completed": total_cases,
-        "accuracy": accuracy
+        "accuracy": accuracy,
+        "streak": user.streak,
+        "last_active_date": user.last_active_date.isoformat() if user.last_active_date else None
     })
 
 # --- INITIALIZATION ---

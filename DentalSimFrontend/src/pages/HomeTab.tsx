@@ -121,6 +121,10 @@ const HomeTab: React.FC = () => {
     // Calculate generic progress for UI visualization
     const xpProgress = userInfo ? (userInfo.xp % 1000) / 1000 : 0.5;
 
+    // Check if the streak is active today
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isStreakActive = userInfo?.last_active_date === todayStr;
+
     return (
         <IonPage>
             <IonHeader className="ion-no-border">
@@ -142,10 +146,30 @@ const HomeTab: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Streak Badge (Mock for now) */}
-                        <div className="flex items-center gap-2 bg-gradient-to-r from-orange-100 to-amber-100 px-3 py-2 rounded-full">
-                            <IonIcon icon={flame} className="text-orange-500 text-xl" />
-                            <span className="font-bold text-orange-600">{mockStats.streak}</span>
+                        {/* Streak Badge */}
+                        <div
+                            className={` flex items-center gap-2 px-3 py-2 rounded-full transition-all duration-500
+                                ${isStreakActive
+                                ? 'bg-gradient-to-r from-orange-100 to-amber-100 border border-orange-200'  // Active: Orange/Amber
+                                : 'bg-gray-100 border border-gray-200'                                      // Inactive: Grey
+                                }
+                            `}
+                        >
+                            <IonIcon
+                                icon={flame}
+                                className={`
+                                    text-xl transition-colors duration-500
+                                    ${isStreakActive ? 'text-orange-500' : 'text-gray-400'}
+                                `}
+                            />
+                            <span
+                                className={`
+                                    font-bold transition-colors duration-500
+                                    ${isStreakActive ? 'text-orange-600' : 'text-gray-500'}
+                                `}
+                            >
+                                {userInfo?.streak || 0}
+                            </span>
                         </div>
                     </div>
                 </IonToolbar>
@@ -224,7 +248,7 @@ const HomeTab: React.FC = () => {
                             <p className="text-xs text-green-500">Accuracy</p>
                         </div>
 
-                        {/* BADGES CARD (Already working) */}
+                        {/* BADGES CARD */}
                         <div className="bg-purple-50 rounded-2xl p-4 text-center">
                             <div className="bg-purple-100 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-2">
                                 <IonIcon icon={sparkles} className="text-purple-600 text-xl" />

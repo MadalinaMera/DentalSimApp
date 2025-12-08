@@ -75,7 +75,7 @@ const DiagnosisPage: React.FC = () => {
     const [showConfirmAlert, setShowConfirmAlert] = useState(false);
     const [showResultModal, setShowResultModal] = useState(false);
     const [isSubmittingDiagnosis, setIsSubmittingDiagnosis] = useState(false);
-
+    const [showExitAlert, setShowExitAlert] = useState(false);
     // Result state
     const [diagnosisResult, setDiagnosisResult] = useState<{
         correct: boolean;
@@ -244,7 +244,7 @@ const DiagnosisPage: React.FC = () => {
             <IonHeader className="ion-no-border">
                 <IonToolbar className="diagnosis-toolbar">
                     <IonButtons slot="start">
-                        <IonButton onClick={() => setShowConfirmAlert(true)} color="medium">
+                        <IonButton onClick={() => setShowExitAlert(true)} color="medium">
                             <IonIcon icon={arrowBack} slot="icon-only" />
                         </IonButton>
                     </IonButtons>
@@ -336,7 +336,15 @@ const DiagnosisPage: React.FC = () => {
                             placeholder="Ask a question..."
                             autoGrow
                             rows={1}
+                            enterkeyhint="send"
                             onIonInput={(e) => setInputText(e.detail.value || '')}
+                            onKeyDown={(e) => {
+                                // If Enter is pressed WITHOUT Shift (Shift+Enter = new line)
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault(); // Stop it from adding a new line
+                                    handleSendMessage(); // Send the message!
+                                }
+                            }}
                             className="chat-input"
                         />
                     </div>
@@ -382,15 +390,26 @@ const DiagnosisPage: React.FC = () => {
                 </IonContent>
             </IonModal>
 
-            {/* Confirmation Alert */}
+            {/* Exit/Abort Alert */}
             <IonAlert
-                isOpen={showConfirmAlert}
-                onDidDismiss={() => setShowConfirmAlert(false)}
-                header="Finalize Diagnosis"
-                message="Are you sure? You cannot change this later."
+                isOpen={showExitAlert}
+                onDidDismiss={() => setShowExitAlert(false)}
+                header="Exit Session?"
+                message="If you leave now, you won't get any XP, but your accuracy score won't be affected."
                 buttons={[
-                    { text: 'Cancel', role: 'cancel' },
-                    { text: 'Submit', handler: confirmDiagnosis }
+                    {
+                        text: 'Stay',
+                        role: 'cancel',
+                    },
+                    {
+                        text: 'Leave',
+                        role: 'destructive',
+                        handler: () => {
+                            // Just navigate away. The session stays "incomplete" in the DB
+                            // so it won't count against your accuracy stats.
+                            history.replace('/tabs/home');
+                        },
+                    },
                 ]}
             />
 
