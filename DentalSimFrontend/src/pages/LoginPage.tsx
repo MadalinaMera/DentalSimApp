@@ -139,12 +139,6 @@ const LoginPage: React.FC = () => {
                                 </div>
                             )}
 
-                            <div className="text-right">
-                                <button className="text-indigo-600 text-sm font-medium">
-                                    Forgot password?
-                                </button>
-                            </div>
-
                             <IonButton
                                 expand="block"
                                 className="login-button mt-4"
