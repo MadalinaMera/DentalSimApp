@@ -32,7 +32,7 @@ import {
     Badge,
 } from '../services/BadgeService';
 import BadgeComponent, { BadgeDetail } from '../components/BadgeComponent';
-
+import { API_BASE_URL } from '../config';
 const ProfileTab: React.FC = () => {
     const history = useHistory(); // <--- 4. Initialize History
     const [userProfile, setUserProfile] = useState<any>(null);
@@ -59,7 +59,7 @@ const ProfileTab: React.FC = () => {
         if (!token) return;
 
         try {
-            const response = await fetch('http://localhost:8000/auth/profile', {
+            const response = await fetch(`${API_BASE_URL}/auth/profile`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
 

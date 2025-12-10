@@ -27,6 +27,7 @@ import {
 import { getJoinedClasses, getUserStats } from '../services/BadgeService';
 
 import logoImg from '../assets/NoBackground.png';
+import { API_BASE_URL } from '../config';
 
 const HomeTab: React.FC = () => {
     const history = useHistory();
@@ -50,7 +51,7 @@ const HomeTab: React.FC = () => {
             if (!token) return; // If no token, we can't fetch
 
             // 1. Ask the backend for the latest stats
-            const response = await fetch('http://localhost:8000/auth/profile', {
+            const response = await fetch(`${API_BASE_URL}/auth/profile`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}` // Show our ID card
@@ -82,7 +83,7 @@ const HomeTab: React.FC = () => {
             }
 
             // 1. Call the Backend
-            const response = await fetch('http://localhost:8000/chat/start/random', {
+            const response = await fetch(`${API_BASE_URL}/chat/start/random`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

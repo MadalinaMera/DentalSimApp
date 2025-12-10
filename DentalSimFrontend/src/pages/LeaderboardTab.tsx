@@ -15,7 +15,7 @@ import {
     useIonViewWillEnter,
 } from '@ionic/react';
 import { trophy, medal, flame } from 'ionicons/icons';
-
+import { API_BASE_URL } from '../config';
 const LeaderboardTab: React.FC = () => {
     const [timeFilter, setTimeFilter] = useState<string>('all');
     const [leaderboard, setLeaderboard] = useState<any[]>([]);
@@ -31,7 +31,7 @@ const LeaderboardTab: React.FC = () => {
 
     const fetchLeaderboard = async () => {
         try {
-            const response = await fetch('http://localhost:8000/auth/leaderboard');
+            const response = await fetch(`${API_BASE_URL}/auth/leaderboard`);
             if (response.ok) {
                 const data = await response.json();
                 setLeaderboard(data);

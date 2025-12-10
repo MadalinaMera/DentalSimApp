@@ -17,6 +17,7 @@ import {
 import { personOutline, lockClosedOutline, schoolOutline, medkitOutline } from 'ionicons/icons';
 
 import logoImg from '../assets/NoBackground.png';
+import { API_BASE_URL } from '../config';
 
 const SignupPage: React.FC = () => {
     const history = useHistory();
@@ -39,7 +40,7 @@ const SignupPage: React.FC = () => {
         setIsLoading(true);
 
         try {
-            const response = await fetch('http://localhost:8000/auth/register', {
+            const response = await fetch(`${API_BASE_URL}/auth/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

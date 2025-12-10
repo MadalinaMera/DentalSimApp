@@ -34,7 +34,7 @@ import {
     closeCircle,
 } from 'ionicons/icons';
 import { getDiagnosisOptions } from '../services/BadgeService';
-
+import { API_BASE_URL } from '../config';
 interface Message {
     id: string;
     type: 'patient' | 'student' | 'system';
@@ -141,7 +141,7 @@ const DiagnosisPage: React.FC = () => {
             const token = localStorage.getItem('token');
             if (!token || !caseId) throw new Error("Session invalid");
 
-            const response = await fetch('http://localhost:8000/chat', {
+            const response = await fetch(`${API_BASE_URL}/chat`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -183,7 +183,7 @@ const DiagnosisPage: React.FC = () => {
 
             const token = localStorage.getItem('token');
 
-            const response = await fetch('http://localhost:8000/chat/diagnose', {
+            const response = await fetch(`${API_BASE_URL}/chat/diagnose`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

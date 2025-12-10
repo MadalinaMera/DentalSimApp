@@ -20,7 +20,7 @@ import {
     IonListHeader,
 } from '@ionic/react';
 import { arrowBack, saveOutline, personCircleOutline, lockClosedOutline } from 'ionicons/icons';
-
+import { API_BASE_URL } from '../config';
 const SettingsPage: React.FC = () => {
     const history = useHistory();
     const [loading, setLoading] = useState(false);
@@ -39,7 +39,7 @@ const SettingsPage: React.FC = () => {
         const fetchUserData = async () => {
             const token = localStorage.getItem('token');
             try {
-                const res = await fetch('http://localhost:8000/auth/profile', {
+                const res = await fetch(`${API_BASE_URL}/auth/profile`, {
                     headers: { Authorization: `Bearer ${token}` }
                 });
                 if (res.ok) {
@@ -58,7 +58,7 @@ const SettingsPage: React.FC = () => {
         setLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch('http://localhost:8000/auth/update-profile', {
+            const res = await fetch(`${API_BASE_URL}/auth/update-profile`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ username, role }),
@@ -83,7 +83,7 @@ const SettingsPage: React.FC = () => {
         setLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch('http://localhost:8000/auth/change-password', {
+            const res = await fetch(`${API_BASE_URL}/auth/change-password`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
