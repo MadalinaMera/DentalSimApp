@@ -167,16 +167,7 @@ const mockBadges: Badge[] = [
     rarity: 'rare',
     requirement: 'Join 3 classes',
     xpReward: 100,
-  },
-  {
-    id: 'radiograph-reader',
-    name: 'Radiograph Reader',
-    description: 'Use the X-ray tool in 50 cases',
-    icon: '📷',
-    rarity: 'rare',
-    requirement: 'Use X-ray 50 times',
-    xpReward: 200,
-  },
+  }
 ];
 
 const mockUserStats: UserStats = {

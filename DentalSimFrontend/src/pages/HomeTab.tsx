@@ -254,7 +254,7 @@ const HomeTab: React.FC = () => {
                                 <IonIcon icon={sparkles} className="text-purple-600 text-xl" />
                             </div>
                             <p className="text-2xl font-bold text-purple-700">
-                                {userInfo?.badge_count || 0}
+                                {userInfo?.earned_badges?.length || 0}
                             </p>
                             <p className="text-xs text-purple-500">Badges</p>
                         </div>
