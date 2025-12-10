@@ -10,15 +10,10 @@ from sqlalchemy.sql.expression import func
 
 # --- APP CONFIGURATION ---
 app = Flask(__name__)
-
-# 1. CORS: Allow your frontend (Ionic) to communicate with this backend
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-# 2. DATABASE: SQLite file
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dentalsim.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# 3. SECURITY: JWT Secret Key (Change this in production!)
 app.config['JWT_SECRET_KEY'] = 'super-secret-dental-key-change-me'
 
 db = SQLAlchemy(app)
@@ -45,12 +40,11 @@ class User(db.Model):
     xp = db.Column(db.Integer, default=0)
     classroom_id = db.Column(db.Integer, db.ForeignKey('classroom.id'), nullable=True)
 
+    # Gamification Stats
     streak = db.Column(db.Integer, default=0)
     last_active_date = db.Column(db.Date, nullable=True)
-
-    # --- NEW: ROLE COLUMN ---
     role = db.Column(db.String(50), default='Dental Student')
-    # ------------------------
+    consecutive_correct = db.Column(db.Integer, default=0) # <--- New for "Perfect Ten"
 
     badges = db.relationship('UserBadge', backref='user', lazy=True)
     sessions = db.relationship('ChatSession', backref='user', lazy=True)
@@ -59,6 +53,7 @@ class Disease(db.Model):
     __tablename__ = 'disease'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
+    category = db.Column(db.String(50), default='General') # <--- New for specialist badges
     system_prompt = db.Column(db.Text, nullable=False)
 
 class ChatSession(db.Model):
@@ -70,7 +65,7 @@ class ChatSession(db.Model):
     end_time = db.Column(db.DateTime, nullable=True)
     is_completed = db.Column(db.Boolean, default=False)
     was_correct = db.Column(db.Boolean, default=False)
-    
+
     messages = db.relationship('ChatMessage', backref='session', lazy=True, order_by="ChatMessage.timestamp")
     disease = db.relationship('Disease')
 
@@ -78,7 +73,7 @@ class ChatMessage(db.Model):
     __tablename__ = 'chat_message'
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey('chat_session.id'), nullable=False)
-    sender = db.Column(db.String(20), nullable=False) # 'student', 'patient', 'system'
+    sender = db.Column(db.String(20), nullable=False)
     content = db.Column(db.Text, nullable=False)
     timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
@@ -89,7 +84,7 @@ class UserBadge(db.Model):
     badge_name = db.Column(db.String(50), nullable=False)
     awarded_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
-# --- SEED DATA (Your Diseases) ---
+# --- SEED DATA ---
 DISEASE_DATA = [
     {
         "name": "Simple Caries",
@@ -261,14 +256,8 @@ You are a simulated dental patient. Diagnosis: **Pericoronitis** (HIDDEN).
 1. **Be Muffled:** Indicate it's hard to speak/open mouth."""
     }
 ]
-# Note: For brevity in this response, I shortened the prompts, but you should paste 
-# your full DISEASE_DATA list here so the AI works correctly.
 
 # --- ROUTES ---
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "message": "DentalSim Backend is running"})
 
 @app.route("/auth/register", methods=["POST"])
 def register():
@@ -302,6 +291,7 @@ def register():
     db.session.commit()
 
     return jsonify({"message": "User created", "username": username}), 201
+
 @app.route("/auth/login", methods=["POST"])
 def login():
     data = request.get_json()
@@ -314,33 +304,28 @@ def login():
         return jsonify({"error": "Invalid credentials"}), 401
 
     token = create_access_token(identity=str(user.id))
-    
+
     return jsonify({
         "token": token,
         "user": {
             "username": user.username,
             "xp": user.xp,
-            "badge_count": len(user.badges)
+            "role": user.role
         }
     })
+
 
 @app.route("/chat/start/random", methods=["POST"])
 @jwt_required()
 def start_random_chat():
     current_user_id = get_jwt_identity()
-    
     disease = Disease.query.order_by(func.random()).first()
     if not disease:
         return jsonify({"error": "No diseases in database"}), 500
 
-    # Create new session
     new_session = ChatSession(user_id=current_user_id, disease_id=disease.id)
     db.session.add(new_session)
     db.session.commit()
-    
-    # Optional: Log system prompt as the first 'hidden' message if you want history
-    # db.session.add(ChatMessage(session_id=new_session.id, sender="system", content=disease.system_prompt))
-    # db.session.commit()
 
     print("New chat session started:", new_session.id, "Disease:", disease.name)
     return jsonify({
@@ -356,26 +341,21 @@ def chat():
     session_id = data.get("session_id")
     user_message = data.get("message", "")
 
-    # Validate Session
     session = ChatSession.query.filter_by(id=session_id).first()
     if not session:
         return jsonify({"error": "Invalid session"}), 404
-    
-    # 1. Save Student Message
+
     db.session.add(ChatMessage(session_id=session.id, sender="student", content=user_message))
     db.session.commit()
 
-    # 2. Build History for LLM
-    # We fetch the last 10 messages to keep context window manageable
     recent_msgs = ChatMessage.query.filter_by(session_id=session.id).order_by(ChatMessage.timestamp.desc()).limit(10).all()
-    recent_msgs.reverse() # Put them back in chronological order
+    recent_msgs.reverse()
 
     conversation_history = [{"role": "system", "content": session.disease.system_prompt}]
     for msg in recent_msgs:
         role = "user" if msg.sender == "student" else "assistant"
         conversation_history.append({"role": role, "content": msg.content})
 
-    # 3. Call External LLM (Colab)
     payload = {
         "messages": conversation_history,
         "max_new_tokens": 150,
@@ -384,25 +364,31 @@ def chat():
 
     try:
         response = requests.post(HF_URL, json=payload, headers=HF_HEADERS, timeout=120)
-        
         if response.status_code == 200:
             ai_data = response.json()
             bot_reply = ai_data.get("generated_text", "")
-            
-            # 4. Save Patient Reply
             db.session.add(ChatMessage(session_id=session.id, sender="patient", content=bot_reply))
             db.session.commit()
-
             return jsonify({"reply": bot_reply})
         else:
             return jsonify({"error": f"LLM Error: {response.status_code}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- CORE BADGE LOGIC HERE ---
+def check_and_award_badge(user, badge_name, xp_bonus=0):
+    existing_badge = UserBadge.query.filter_by(user_id=user.id, badge_name=badge_name).first()
+    if not existing_badge:
+        db.session.add(UserBadge(user_id=user.id, badge_name=badge_name))
+        user.xp += xp_bonus
+        return f" [BADGE: {badge_name}]"
+    return ""
+
 @app.route("/chat/diagnose", methods=["POST"])
 @jwt_required()
 def check_diagnosis():
     current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
     data = request.get_json()
     session_id = data.get("session_id")
     student_diagnosis = data.get("diagnosis", "").strip().lower()
@@ -413,58 +399,100 @@ def check_diagnosis():
 
     correct_name = session.disease.name.lower()
     is_correct = correct_name in student_diagnosis
-    
+
     xp_gained = 0
     message = ""
+    badge_alerts = ""
 
     if is_correct:
         xp_gained = 100
         session.was_correct = True
+        user.consecutive_correct += 1 # Increment streak
         message = f"Correct! The diagnosis was {session.disease.name}."
-        
-        # Check for Speedster Badge (Example: < 2 mins)
+
+        # 1. BADGE: Speed Demon (< 2 mins)
         duration = (datetime.datetime.utcnow() - session.start_time).total_seconds()
         if duration < 120:
-            # Check if badge already exists
-            existing_badge = UserBadge.query.filter_by(user_id=current_user_id, badge_name="Speedster").first()
-            if not existing_badge:
-                db.session.add(UserBadge(user_id=current_user_id, badge_name="Speedster"))
-                xp_gained += 50
-                message += " [BADGE UNLOCKED: Speedster]"
+            badge_alerts += check_and_award_badge(user, "Speed Demon", 100)
+
+        # 2. BADGE: Perfect Ten (10 correct in a row)
+        if user.consecutive_correct >= 10:
+            badge_alerts += check_and_award_badge(user, "Perfect Ten", 300)
+
+        # 3. BADGE: Endodontist Expert (20 Pulp-related)
+        if session.disease.category == 'Pulpal':
+            # Count previous correct pulpal cases
+            # Note: This query is a bit complex for SQLite in raw SQLAlchemy without joins, simplified here:
+            pulpal_count = ChatSession.query.join(Disease).filter(
+                ChatSession.user_id==user.id,
+                ChatSession.was_correct==True,
+                Disease.category=='Pulpal'
+            ).count()
+            # +1 because the current session isn't committed yet
+            if pulpal_count + 1 >= 20:
+                badge_alerts += check_and_award_badge(user, "Endodontist Expert", 500)
+
+        # 4. BADGE: Periodontal Pro (20 Perio-related)
+        if session.disease.category == 'Periodontal':
+            perio_count = ChatSession.query.join(Disease).filter(
+                ChatSession.user_id==user.id,
+                ChatSession.was_correct==True,
+                Disease.category=='Periodontal'
+            ).count()
+            if perio_count + 1 >= 20:
+                badge_alerts += check_and_award_badge(user, "Periodontal Pro", 500)
+
     else:
         xp_gained = 20
-        message = f"Incorrect. The correct diagnosis was {session.disease.name}."
+        user.consecutive_correct = 0 # Reset streak
+        message = f"Incorrect. The correct diagnosis was {session.disease.name}. (+20 XP for effort)"
 
+    # --- GLOBAL BADGES (Correct or Incorrect) ---
 
-    # Update User XP
-    user = User.query.get(current_user_id)
-    user.xp += xp_gained
+    # 5. BADGE: First Steps (First case completed)
+    badge_alerts += check_and_award_badge(user, "First Steps", 50)
 
-    ## Streak Logic
+    # 6. BADGE: Master Diagnostician (100 total cases)
+    total_cases = ChatSession.query.filter_by(user_id=user.id, is_completed=True).count()
+    if total_cases + 1 >= 100:
+        badge_alerts += check_and_award_badge(user, "Master Diagnostician", 2000)
+
+    # 7. BADGE: Early Bird (Before 7 AM server time)
+    current_hour = datetime.datetime.utcnow().hour
+    if current_hour < 7:
+        badge_alerts += check_and_award_badge(user, "Early Bird", 25)
+
+    # 8. BADGE: Night Owl (After 11 PM server time)
+    if current_hour >= 23:
+        badge_alerts += check_and_award_badge(user, "Night Owl", 25)
+
+    # --- STREAK LOGIC & BADGES ---
     today = datetime.date.today()
-
-    # If this is the first time playing today...
     if user.last_active_date != today:
-        # Check if they played yesterday
         yesterday = today - datetime.timedelta(days=1)
-
         if user.last_active_date == yesterday:
-            # They kept the streak alive!
             user.streak += 1
         else:
-            # They missed a day (or are new), reset to 1
             user.streak = 1
-
-        # Update the last active date to today
         user.last_active_date = today
 
+    # 9. BADGE: Week Warrior (7 day streak)
+    if user.streak >= 7:
+        badge_alerts += check_and_award_badge(user, "Week Warrior", 150)
+
+    # 10. BADGE: Monthly Master (30 day streak)
+    if user.streak >= 30:
+        badge_alerts += check_and_award_badge(user, "Monthly Master", 1000)
+
+    # Finalize
+    user.xp += xp_gained
     session.is_completed = True
     session.end_time = datetime.datetime.utcnow()
     db.session.commit()
 
     return jsonify({
         "correct": is_correct,
-        "message": message,
+        "message": message + badge_alerts,
         "xp_gained": xp_gained,
         "correct_diagnosis": session.disease.name
     })
@@ -478,7 +506,6 @@ def get_profile():
     if not user:
         return jsonify({"error": "User not found"}), 404
 
-    # Calculate Stats
     completed_sessions = [s for s in user.sessions if s.is_completed]
     total_cases = len(completed_sessions)
     correct_cases = len([s for s in completed_sessions if s.was_correct])
@@ -487,42 +514,21 @@ def get_profile():
     if total_cases > 0:
         accuracy = int((correct_cases / total_cases) * 100)
 
-    # Get list of earned badge names
+    rank = User.query.filter(User.xp > user.xp).count() + 1
     earned_badge_names = [b.badge_name for b in user.badges]
 
-    rank = User.query.filter(User.xp > user.xp).count() + 1
     return jsonify({
         "username": user.username,
-        "role": user.role,
         "xp": user.xp,
         "cases_completed": total_cases,
         "accuracy": accuracy,
         "streak": user.streak,
         "last_active_date": user.last_active_date.isoformat() if user.last_active_date else None,
         "earned_badges": earned_badge_names,
-        "rank": rank
+        "rank": rank,
+        "role": user.role
     })
 
-@app.route("/auth/leaderboard", methods=["GET"])
-def get_leaderboard():
-    # Get top 50 users sorted by XP
-    top_users = User.query.order_by(User.xp.desc()).limit(50).all()
-
-    leaderboard_data = []
-    for index, u in enumerate(top_users):
-        leaderboard_data.append({
-            "id": u.id,
-            "username": u.username,
-            "xp": u.xp,
-            "streak": u.streak,
-            "rank": index + 1,
-            # Calculate level just for display (XP / 1000 + 1)
-            "level": int(u.xp / 1000) + 1
-        })
-
-    return jsonify(leaderboard_data)
-
-# Update Profile (Username & Role)
 @app.route("/auth/update-profile", methods=["PUT"])
 @jwt_required()
 def update_profile():
@@ -534,7 +540,6 @@ def update_profile():
     new_role = data.get("role", "").strip()
 
     if new_username:
-        # Check if taken (unless it's their own)
         existing = User.query.filter_by(username=new_username).first()
         if existing and existing.id != user.id:
             return jsonify({"error": "Username already taken"}), 409
@@ -546,41 +551,34 @@ def update_profile():
     db.session.commit()
     return jsonify({"message": "Profile updated successfully"})
 
-# Change Password
-@app.route("/auth/change-password", methods=["PUT"])
-@jwt_required()
-def change_password():
-    current_user_id = get_jwt_identity()
-    user = User.query.get(current_user_id)
-    data = request.get_json()
+@app.route("/auth/leaderboard", methods=["GET"])
+def get_leaderboard():
+    top_users = User.query.order_by(User.xp.desc()).limit(50).all()
+    leaderboard_data = []
+    for index, u in enumerate(top_users):
+        leaderboard_data.append({
+            "id": u.id,
+            "username": u.username,
+            "xp": u.xp,
+            "streak": u.streak,
+            "rank": index + 1,
+            "level": int(u.xp / 1000) + 1
+        })
+    return jsonify(leaderboard_data)
 
-    current_pw = data.get("current_password", "")
-    new_pw = data.get("new_password", "")
-
-    if not check_password_hash(user.password_hash, current_pw):
-        return jsonify({"error": "Current password incorrect"}), 401
-
-    if len(new_pw) < 4:
-        return jsonify({"error": "New password too short"}), 400
-
-    user.password_hash = generate_password_hash(new_pw)
-    db.session.commit()
-    return jsonify({"message": "Password changed successfully"})
-
-# --- INITIALIZATION ---
 if __name__ == "__main__":
     with app.app_context():
-        # This creates the new tables defined above
         db.create_all()
-        
-        # Seed Diseases if not present
         if DISEASE_DATA and not Disease.query.first():
             print("Seeding database with diseases...")
             for d in DISEASE_DATA:
-                db.session.add(Disease(name=d["name"], system_prompt=d["prompt"]))
+                db.session.add(Disease(
+                    name=d["name"],
+                    category=d.get("category", "General"),
+                    system_prompt=d["prompt"]
+                ))
             db.session.commit()
             print("Seeding complete.")
-            
-    # Start the Server
-    print("Starting DentalSim Backend on port 9003...")
-    app.run(host="0.0.0.0", port=9003, debug=True)
+
+    print("Starting DentalSim Backend on port 8000...")
+    app.run(host="0.0.0.0", port=8000, debug=True)
