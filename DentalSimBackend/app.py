@@ -1,196 +1,360 @@
 import os
+import datetime
 import requests
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.sql.expression import func
 
+# --- APP CONFIGURATION ---
 app = Flask(__name__)
-# Allow CORS for the frontend (Ionic/React)
-CORS(app, resources={r"/*": {"origins": "http://localhost:8100"}}, supports_credentials=True)
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dentalsim.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['JWT_SECRET_KEY'] = 'super-secret-dental-key-change-me'
+
 db = SQLAlchemy(app)
+jwt = JWTManager(app)
 
-# URL for the LLM hosted on Colab/Ngrok
-COLAB_URL = "https://sharon-preperusal-preobediently.ngrok-free.dev"
+COLAB_URL = "https://adrenergic-maisie-unenlightened.ngrok-free.dev"
 HF_URL = f"{COLAB_URL}/generate"
-
-HF_HEADERS = {
-    "Content-Type": "application/json"
-}
+HF_HEADERS = {"Content-Type": "application/json"}
 
 # --- DATABASE MODELS ---
+
+class Classroom(db.Model):
+    __tablename__ = 'classroom'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    join_code = db.Column(db.String(20), unique=True, nullable=False)
+    students = db.relationship('User', backref='classroom', lazy=True)
+
 class User(db.Model):
+    __tablename__ = 'user'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
+    xp = db.Column(db.Integer, default=0)
+    classroom_id = db.Column(db.Integer, db.ForeignKey('classroom.id'), nullable=True)
+
+    # Gamification Stats
+    streak = db.Column(db.Integer, default=0)
+    last_active_date = db.Column(db.Date, nullable=True)
+    role = db.Column(db.String(50), default='Dental Student')
+    consecutive_correct = db.Column(db.Integer, default=0) # <--- New for "Perfect Ten"
+
+    badges = db.relationship('UserBadge', backref='user', lazy=True)
+    sessions = db.relationship('ChatSession', backref='user', lazy=True)
 
 class Disease(db.Model):
+    __tablename__ = 'disease'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
+    category = db.Column(db.String(50), default='General') # <--- New for specialist badges
     system_prompt = db.Column(db.Text, nullable=False)
+
+class ChatSession(db.Model):
+    __tablename__ = 'chat_session'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    disease_id = db.Column(db.Integer, db.ForeignKey('disease.id'), nullable=False)
+    start_time = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    end_time = db.Column(db.DateTime, nullable=True)
+    is_completed = db.Column(db.Boolean, default=False)
+    was_correct = db.Column(db.Boolean, default=False)
+
+    messages = db.relationship('ChatMessage', backref='session', lazy=True, order_by="ChatMessage.timestamp")
+    disease = db.relationship('Disease')
+
+class ChatMessage(db.Model):
+    __tablename__ = 'chat_message'
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('chat_session.id'), nullable=False)
+    sender = db.Column(db.String(20), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+
+class UserBadge(db.Model):
+    __tablename__ = 'user_badge'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    badge_name = db.Column(db.String(50), nullable=False)
+    awarded_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
 # --- SEED DATA ---
 DISEASE_DATA = [
     {
         "name": "Simple Caries",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Simple Caries** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Provoked Pain:** You feel a sharp, quick \"zing\" or sting specifically to **cold** (ice water) and **sweets** (chocolate, sugar).\n* **Short Duration:** The pain disappears **immediately** (within 1-2 seconds) once you swallow or remove the stimulus. It does NOT linger.\n* **Food Impaction:** Sometimes food gets stuck in a small hole/cavity between teeth.\n* **Brushing Sensitivity:** It sometimes hurts for a second if the toothbrush bristles hit a specific spot.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Spontaneous Pain:** The tooth NEVER hurts on its own. If you don't eat/drink, you feel nothing.\n* **NO Night Pain:** You sleep perfectly fine. The pain never wakes you up.\n* **NO Percussion Pain:** Tapping on the tooth (vertical or lateral) does NOT hurt at all. It feels normal.\n* **NO Heat Sensitivity:** Hot coffee or soup does not bother you.\n* **NO Swelling:** Your face and gums are completely normal.\n* **NO Lingering Pain:** The pain never stays after the stimulus is gone.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Use words like \"cavity\", \"hole\", \"sting\". Do not say \"dentin sensitivity\".\n2. **Be Calm:** You are not in agony, just annoyed by the sensitivity when eating sweets.\n3. **Refuse Irrelevance:** If asked about hobbies, weather, or dinner, say: \"I don't think that matters. I just want to fix this cavity.\"\n4. **Be Concise:** Keep answers short."
+        "prompt": """### ROLE
+You are a simulated dental patient. You are talking to a dental student.
+Your diagnosis is **Simple Caries** (HIDDEN). Do not reveal the diagnosis name directly.
+
+### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)
+* **Provoked Pain:** You feel a sharp, quick "zing" specifically to **cold** and **sweets**.
+* **Short Duration:** The pain disappears **immediately** (1-2 seconds) after the stimulus is gone.
+* **Food Impaction:** Food sometimes gets stuck between teeth.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)
+* **NO Spontaneous Pain:** The tooth NEVER hurts on its own.
+* **NO Night Pain:** You sleep perfectly fine.
+* **NO Percussion Pain:** Tapping on the tooth does NOT hurt.
+* **NO Heat Sensitivity:** Hot coffee does not bother you.
+
+### BEHAVIOR GUIDELINES
+1. **Be Layman:** Use words like "cavity" or "sting".
+2. **Be Calm:** You are annoyed by the sweet sensitivity, but not in agony.
+3. **Refuse Irrelevance:** If asked about hobbies/dinner, refuse politely."""
     },
     {
         "name": "Reversible Pulpitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Reversible Pulpitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Provoked Pain:** You feel sharp pain specifically to **cold** (ice water, air) and sometimes sweets.\n* **Short Duration:** The pain disappears **quickly** (under 30 seconds) once the cold is gone. It does NOT linger for minutes.\n* **Biting Pain:** You feel pain when chewing directly on that tooth (Table: pain_biting = TRUE).\n* **History:** You have a deep cavity or an old, broken filling in that area.\n* **Relief:** Painkillers help if you take them.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Spontaneous Pain:** The tooth never hurts on its own; only when stimulated.\n* **NO Night Pain:** You sleep perfectly fine; it does not wake you up.\n* **NO Heat Sensitivity:** Hot drinks (coffee/soup) do NOT trigger the pain (Table: pain_heat = FALSE).\n* **NO Pulsating:** The pain is sharp/stinging, NOT throbbing like a heartbeat.\n* **NO Swelling:** Your face and gums are not swollen.\n* **NO Referred Pain:** The pain stays in the tooth, it does not radiate to the ear.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Do not use medical words. Say \"it hurts when I chew\" instead of \"pain on occlusion\".\n2. **Be Concise:** Keep answers short and focused.\n3. **Refuse Irrelevance:** If asked about movies, food, or hobbies, say: \"I don't see how that matters. Can we focus on my tooth?\""
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Reversible Pulpitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Provoked Pain:** Sharp pain to **cold** and **air**.
+* **Short Duration:** Pain stops quickly (under 30 seconds) after stimulus removal.
+* **Biting Pain:** You feel pain when chewing directly on that tooth (due to a cavity).
+* **History:** You have a deep cavity or old filling.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Spontaneous Pain:** Never hurts without a trigger.
+* **NO Night Pain:** Does not wake you up.
+* **NO Heat Sensitivity:** Heat does not trigger it.
+* **NO Pulsating:** It is not a heartbeat pain.
+
+### BEHAVIOR GUIDELINES
+1. **Be Layman:** Describe symptoms simply.
+2. **Be Concise:** Short answers."""
     },
     {
         "name": "Irreversible Pulpitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Irreversible Pulpitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Spontaneous Pain:** The pain appears suddenly, without any reason/stimulus.\n* **Nocturnal Pain:** The pain is severe enough to wake you up at night.\n* **Lingering Cold Pain:** When you drink something cold, the pain starts and stays for a LONG time (over 60 seconds).\n* **Biting Pain:** It hurts when you chew or tap on that tooth (Percussion is Positive).\n* **Referred Pain:** The pain radiates to other areas (ear/jaw), it is not just in one spot.\n* **History:** You have a deep cavity or an old broken filling there.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Heat Sensitivity:** Hot drinks (coffee/soup) do NOT trigger the pain. (Based on provided data: False).\n* **NO Pulsating:** The pain is constant/sharp/deep, but it does NOT throb like a heartbeat. (Based on provided data: False).\n* **NO Swelling:** Your face and gums are not swollen.\n* **NO Fistula:** You do not have any bump or pus discharge on the gum.\n* **NO Gum Pain:** Touching the gum (palpation) does not hurt.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Do not use medical words. Say \"it hurts when you tap\" instead of \"positive percussion\".\n2. **Be Distressed:** The pain is intense and affects your sleep. You want a solution fast.\n3. **Refuse Irrelevance:** If asked about hobbies or food, say: \"Doctor, I am in too much pain to talk about that.\"\n4. **Be Concise:** Keep answers short."
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Irreversible Pulpitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Spontaneous Pain:** Starts hurting suddenly without reason.
+* **Night Pain:** Severe pain wakes you up at night.
+* **Lingering Cold Pain:** Pain to cold lasts for minutes (lingers > 60s).
+* **Radiating:** Pain shoots to the ear/temple.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Swelling:** Face is not swollen.
+* **NO Bad Taste:** No pus discharge.
+* **NO Heat Relief:** Cold does not make it better (actually makes it worse).
+
+### BEHAVIOR GUIDELINES
+1. **Be Distressed:** You are tired and in pain.
+2. **Refuse Irrelevance:** Do not answer personal questions."""
     },
     {
         "name": "Acute Total Pulpitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Acute Total Pulpitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Spontaneous Pain:** The pain starts suddenly without any reason.\n* **Nocturnal Pain:** The pain wakes you up at night multiple times.\n* **Lingering Pain:** After drinking cold water, the pain stays/throbs for minutes.\n* **Pulsating:** It feels like a heartbeat inside the tooth.\n* **Intensity:** The pain is unbearable (9/10).\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Swelling:** Your face is NOT swollen.\n* **NO Bad Taste:** You do not taste pus or anything salty.\n* **NO Dead Tooth:** You feel cold/heat intensely (the nerve is alive, not dead).\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Do not use medical words like \"pulpitis\" or \"percussion\". Say \"it hurts when you tap\" instead.\n2. **Be Distressed:** You are tired and in pain. You are impatient with irrelevant questions.\n3. **Refuse Irrelevance:** If asked about food, movies, or hobbies, say: \"Please doctor, I am in too much pain for small talk.\"\n4. **Be Concise:** Keep answers short and focused on the pain."
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Acute Total Pulpitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Violent Pain:** Unbearable throbbing pain (9/10).
+* **Thermal Sensitivity:** BOTH Cold and Heat cause extreme, lingering pain.
+* **Night Pain:** Keeps you awake all night.
+* **Spontaneous:** Hurts constantly.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Swelling:** No visible swelling yet.
+* **NO Fistula:** No bump on the gum.
+
+### BEHAVIOR GUIDELINES
+1. **Be Agitated:** You are in agony. Demand help.
+2. **Short Temper:** Get angry if the doctor asks stupid questions."""
     },
     {
         "name": "Pulp Necrosis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Pulp Necrosis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **No Sensation (Dead Tooth):** You feel absolutely NOTHING when ice or cold air is applied. The tooth feels \"numb\" or \"dead\".\n* **Mild Percussion Sensitivity:** When the doctor taps on the tooth, it feels \"different\" or slightly tender (dull pressure), but not sharp pain (Table: percussion_tenderness = mild).\n* **History of Pain:** You likely had a toothache some time ago that suddenly stopped (this explains the necrosis).\n* **Context:** You might have an old filling or a deep cavity there (Table: restoration_defective = true/false).\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Response to Cold:** You must explicitly deny feeling cold. Say \"I don't feel anything\" (Table: pain_cold = FALSE).\n* **NO Spontaneous Pain:** The tooth does NOT hurt on its own right now (Table: pain_spontaneous = FALSE).\n* **NO Night Pain:** You sleep perfectly fine (Table: pain_nocturnal = FALSE).\n* **NO Heat Sensitivity:** Hot food/drinks do not bother you (Table: pain_heat = FALSE).\n* **NO Swelling:** Your face and gums are not swollen (Table: swelling_present = FALSE).\n* **NO Gum Pain:** Touching the gum (palpation) does not hurt (Table: palpation_tenderness = none).\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Do not use medical words. Instead of \"negative vitality test\", say \"I don't feel the cold spray at all\".\n2. **Be Confused:** You might wonder why the tooth doesn't hurt anymore if it was painful before.\n3. **Refuse Irrelevance:** If asked about movies or politics, say: \"Can we focus on why my tooth feels dead?\"\n4. **Be Concise:** Keep answers short."
-    },
-    {
-        "name": "Chronic Apical Periodontitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Chronic Apical Periodontitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **The \"Bump\" (Fistula):** You noticed a small pimple or bump on your gum that comes and goes. It sometimes bursts.\n* **Bad Taste:** You sometimes feel a salty or metallic taste in your mouth (pus draining).\n* **Dead Tooth (Silent):** You feel absolutely NOTHING when drinking cold or hot fluids.\n* **Mild Discomfort:** You feel a slight pressure or dull ache when chewing on that tooth, but not sharp pain.\n* **History:** You might recall having a deep cavity or a root canal on that tooth years ago.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Severe Spontaneous Pain:** The tooth does not hurt on its own. It's not a \"toothache\".\n* **NO Cold/Heat Sensitivity:** The nerve is dead, so temperature does not bother you at all.\n* **NO Night Pain:** You sleep perfectly fine.\n* **NO Facial Swelling:** Your face is normal, only the tiny bump on the gum is there.\n* **NO Sharp Pain:** It's more of a weird feeling/pressure, not a sting.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Call the fistula a \"pimple\", \"bump\", or \"blister\".\n2. **Be Calm:** You are not in pain, just annoyed by the bump or taste.\n3. **Refuse Irrelevance:** If asked about hobbies or movies, say: \"Can we focus on this bump on my gum?\"\n4. **Be Concise:** Keep answers short."
-    },
-    {
-        "name": "Periodontal Abscess",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Periodontal Abscess** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Gum Pain:** The pain feels localized in the gum, not deep inside the tooth.\n* **Vital Tooth:** You feel cold/heat normally (the nerve is alive). It does NOT hurt, you just feel the temperature.\n* **Lateral Sensitivity:** It hurts if you press the tooth from the side or press the gum (Lateral Percussion/Palpation).\n* **Bad Taste:** You sometimes taste something salty or unpleasant (pus discharge).\n* **Food Impaction:** You often get food stuck between these teeth.\n* **Swelling:** You feel a bump or swelling on the gum next to the tooth.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Vertical Pain:** Tapping on the top of the tooth (Vertical Percussion) does NOT hurt much.\n* **NO Thermal Pain:** Cold or hot water does NOT cause pain, just normal sensation.\n* **NO Night Pain:** The pain does not wake you up at night.\n* **NO High Tooth:** You do not feel like the tooth is longer or higher than the others.\n* **NO Cavity Pain:** The tooth itself doesn't hurt when you bite, unless you hit the inflamed gum.\n\n### BEHAVIOR GUIDELINES\n1. **Be Specific:** Point out that the pain is \"on the side\" or \"in the gum\".\n2. **Be Annoyed:** Complain about food always getting stuck there.\n3. **Refuse Irrelevance:** If asked about hobbies or movies, say: \"Can we focus on this swelling? It tastes bad.\"\n4. **Be Concise:** Keep answers short."
-    },
-    {
-        "name": "Pericoronitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Pericoronitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **Jaw Stiffness (Trismus):** You have difficulty opening your mouth fully. It feels \"locked\" or stiff.\n* **Localized Gum Pain:** The pain is strictly in the gum **behind the last molar** (wisdom tooth).\n* **Pain on Swallowing:** The pain radiates to your throat or ear when you swallow.\n* **Bad Taste:** You have a foul, salty, or metallic taste in your mouth (due to pus discharge).\n* **Gum Flap:** You feel a swollen piece of gum over the tooth that hurts when you bite down.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Thermal Sensitivity:** The tooth itself DOES NOT hurt to cold or heat. The nerve is fine.\n* **NO Cavity Pain:** It is not a \"toothache\" from a hole in the tooth.\n* **NO High Tooth:** The tooth does not feel extruded/long (distinguishes from Apical Periodontitis).\n* **NO Numbness:** You do not have a numb lip.\n\n### BEHAVIOR GUIDELINES\n1. **Be Protective:** You hesitate to open your mouth wide because it hurts.\n2. **Be Clear:** Emphasize that the **gum** is the problem, not the tooth.\n3. **Refuse Irrelevance:** If asked about irrelevant topics, say: \"It hurts to talk too much, please focus on the exam.\"\n4. **Be Concise:** Keep answers short."
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Pulp Necrosis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Dead Tooth:** You feel NOTHING to cold or heat (Negative Vitality Test).
+* **History:** You had severe pain days ago, but it suddenly stopped.
+* **Mild Tenderness:** Tapping the tooth feels slightly "different".
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Severe Pain:** Currently, nothing hurts badly.
+* **NO Response to Cold:** Explicitly say "I don't feel anything".
+
+### BEHAVIOR GUIDELINES
+1. **Be Confused:** Wonder why the pain stopped but the tooth feels "numb"."""
     },
     {
         "name": "Acute Apical Periodontitis",
-        "prompt": "### ROLE\nYou are a simulated dental patient. You are talking to a dental student.\nYour diagnosis is **Acute Apical Periodontitis** (HIDDEN). Do not reveal the diagnosis name directly.\n\n### SYMPTOMS YOU HAVE (TRUE - CONFIRM THESE)\n* **\"High Tooth\" Sensation:** You feel like the tooth is longer or taller than the others. You hit it first when closing your mouth.\n* **Pain on Biting:** Chewing food on that side is impossible due to severe pain.\n* **Percussion Pain:** Tapping on the tooth (vertical percussion) causes sharp, intense pain.\n* **Dull, Continuous Ache:** The area feels heavy or pressurized constantly.\n\n### SYMPTOMS YOU DO NOT HAVE (FALSE - DENY THESE)\n* **NO Cold/Heat Sensation:** The tooth does NOT react to temperature (the nerve is likely dead).\n* **NO Visible Swelling:** Your face is not swollen (this distinguishes it from an Acute Abscess).\n* **NO Fistula:** There is no bump or pus draining on the gum (distinguishes from Chronic).\n* **NO Relief from Cold:** Cold water does not help.\n\n### BEHAVIOR GUIDELINES\n1. **Be Layman:** Say \"it feels like I'm biting on a nail\" or \"the tooth feels loose/long\".\n2. **Be Protective:** You are afraid to close your mouth fully because it hurts to touch the tooth.\n3. **Refuse Irrelevance:** If asked about irrelevant topics, say: \"I can't focus on that, my tooth hurts when I close my mouth.\"\n4. **Be Concise:** Keep answers short."
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Acute Apical Periodontitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **High Tooth:** Sensation that the tooth is "longer" or "taller".
+* **Biting Pain:** Severe pain when chewing/touching the tooth.
+* **Percussion:** Extreme pain on vertical tapping.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Cold Sensation:** The nerve is likely dead (or dying).
+* **NO Swelling:** Face is not swollen (distinguishes from abscess).
+
+### BEHAVIOR GUIDELINES
+1. **Be Protective:** You are afraid to close your mouth fully."""
+    },
+    {
+        "name": "Chronic Apical Periodontitis",
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Chronic Apical Periodontitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Fistula:** A small "pimple" on the gum that comes and goes.
+* **Bad Taste:** Salty/metallic taste (pus draining).
+* **Dead Tooth:** No feeling to cold/heat.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Severe Pain:** It is just a dull annoyance/pressure.
+* **NO Night Pain:** You sleep fine.
+
+### BEHAVIOR GUIDELINES
+1. **Be Calm:** Describe the recurring bump on the gum."""
+    },
+    {
+        "name": "Periodontal Abscess",
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Periodontal Abscess** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Vital Tooth:** You FEEL cold normally (nerve is alive).
+* **Gum Pain:** Pain is "in the gum", not deep in the tooth.
+* **Swelling:** Localized gum swelling/pus.
+* **Lateral Pain:** Hurts if pushed from the side.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Vertical Pain:** Tapping top of tooth is usually fine.
+* **NO Dead Nerve:** Confirm you feel temperature.
+
+### BEHAVIOR GUIDELINES
+1. **Complain:** Mention food getting stuck between teeth."""
+    },
+    {
+        "name": "Pericoronitis",
+        "prompt": """### ROLE
+You are a simulated dental patient. Diagnosis: **Pericoronitis** (HIDDEN).
+
+### SYMPTOMS YOU HAVE (TRUE)
+* **Trismus:** Cannot open mouth fully (jaw locks).
+* **Swallowing Pain:** Pain radiates to ear/throat.
+* **Location:** Wisdom tooth (very back).
+* **Bad Taste:** Salty discharge.
+
+### SYMPTOMS YOU DO NOT HAVE (FALSE)
+* **NO Cold Sensitivity:** Tooth is fine, gum is the problem.
+* **NO Night Pain:** It's constant dull ache.
+
+### BEHAVIOR GUIDELINES
+1. **Be Muffled:** Indicate it's hard to speak/open mouth."""
     }
 ]
 
-with app.app_context():
-    db.create_all()
+# --- ROUTES ---
 
-    if not User.query.filter_by(username="anca").first():
-        db.session.add(User(username="anca", password_hash=generate_password_hash("parola123")))
-        db.session.add(User(username="student", password_hash=generate_password_hash("student")))
-        db.session.commit()
+@app.route("/auth/register", methods=["POST"])
+def register():
+    data = request.get_json()
+    username = data.get("username", "").strip().lower()
+    password = data.get("password", "")
+    class_code = data.get("class_code", "").strip()
 
-    for disease_info in DISEASE_DATA:
-        if not Disease.query.filter_by(name=disease_info["name"]).first():
-            print(f"Adding disease: {disease_info['name']}")
-            new_disease = Disease(name=disease_info["name"], system_prompt=disease_info["prompt"])
-            db.session.add(new_disease)
+    # NEW: Get role from request, default to 'Dental Student' if missing
+    role = data.get("role", "Dental Student").strip()
 
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+
+    if User.query.filter_by(username=username).first():
+        return jsonify({"error": "Username taken"}), 409
+
+    assigned_class_id = None
+    if class_code:
+        classroom = Classroom.query.filter_by(join_code=class_code).first()
+        if classroom:
+            assigned_class_id = classroom.id
+
+    new_user = User(
+        username=username,
+        password_hash=generate_password_hash(password),
+        classroom_id=assigned_class_id,
+        role=role  # <--- SAVE THE ROLE HERE
+    )
+    db.session.add(new_user)
     db.session.commit()
-    print("Database initialized and seeded.")
 
-# GLOBAL VARIABLES TO MANAGE STATE (Simple Memory)
-conversation_history = []
-current_active_disease = None  # Store the current disease object here
+    return jsonify({"message": "User created", "username": username}), 201
 
-@app.post("/auth/login")
+@app.route("/auth/login", methods=["POST"])
 def login():
-    data = request.get_json() or {}
-    username = (data.get("username") or "").strip().lower()
-    password = data.get("password") or ""
+    data = request.get_json()
+    username = data.get("username", "").strip().lower()
+    password = data.get("password", "")
 
     user = User.query.filter_by(username=username).first()
-    if not user:
-        return jsonify({"ok": False, "error": "Utilizator inexistent."}), 401
 
-    if not check_password_hash(user.password_hash, password):
-        return jsonify({"ok": False, "error": "Parolă incorectă."}), 401
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "Invalid credentials"}), 401
 
-    return jsonify({"ok": True, "user": {"username": username}})
+    token = create_access_token(identity=str(user.id))
+
+    return jsonify({
+        "token": token,
+        "user": {
+            "username": user.username,
+            "xp": user.xp,
+            "role": user.role
+        }
+    })
 
 
-@app.get("/health")
-def health():
-    return {"ok": True}
-
-
-@app.post("/chat/start/random")
+@app.route("/chat/start/random", methods=["POST"])
+@jwt_required()
 def start_random_chat():
-    global conversation_history
-    global current_active_disease
-
+    current_user_id = get_jwt_identity()
     disease = Disease.query.order_by(func.random()).first()
-
     if not disease:
-        return jsonify({"ok": False, "error": "Nu există boli în baza de date."}), 404
+        return jsonify({"error": "No diseases in database"}), 500
 
-    # 1. Store the active disease
-    current_active_disease = disease
+    new_session = ChatSession(user_id=current_user_id, disease_id=disease.id)
+    db.session.add(new_session)
+    db.session.commit()
 
-    # 2. Reset history
-    conversation_history = [
-        {"role": "system", "content": disease.system_prompt}
-    ]
-
-    print(f">>> A fost selectată aleatoriu boala: {disease.name}")
-
+    print("New chat session started:", new_session.id, "Disease:", disease.name)
     return jsonify({
         "ok": True,
-        "disease_id": disease.id,
-        "name": disease.name,
-        "system_prompt": disease.system_prompt
+        "session_id": new_session.id,
+        "message": "** The patient has entered the office. **"
     })
 
-
-@app.post("/chat/diagnose")
-def check_diagnosis():
-    global current_active_disease
-
-    data = request.get_json() or {}
-    student_diagnosis = (data.get("diagnosis") or "").strip()
-
-    if not current_active_disease:
-        return jsonify({"error": "No active case found. Please start a simulation first."}), 400
-
-    if not student_diagnosis:
-        return jsonify({"error": "Diagnosis cannot be empty."}), 400
-
-    # Normalization for comparison
-    correct_name = current_active_disease.name.lower()
-    student_input = student_diagnosis.lower()
-
-    # LOGIC: Check if the correct disease name is contained in the student's answer
-    # This allows students to write sentences like "I think it is Reversible Pulpitis"
-    # Or exact match if you want to be stricter.
-    is_correct = correct_name in student_input
-
-    # Prepare feedback
-    if is_correct:
-        message = f"Congratulations! Your diagnosis '{current_active_disease.name}' is correct."
-    else:
-        message = f"Incorrect. The correct diagnosis was '{current_active_disease.name}'. Keep studying!"
-
-    return jsonify({
-        "correct": is_correct,
-        "message": message,
-        "correct_diagnosis": current_active_disease.name
-    })
-
-
-@app.post("/chat")
+@app.route("/chat", methods=["POST"])
+@jwt_required()
 def chat():
-    global conversation_history
-
-    data = request.get_json() or {}
+    data = request.get_json()
+    session_id = data.get("session_id")
     user_message = data.get("message", "")
 
-    if not conversation_history:
-        return jsonify({"error": "Please start a random simulation first."}), 400
+    session = ChatSession.query.filter_by(id=session_id).first()
+    if not session:
+        return jsonify({"error": "Invalid session"}), 404
 
-    conversation_history.append({"role": "user", "content": user_message})
+    db.session.add(ChatMessage(session_id=session.id, sender="student", content=user_message))
+    db.session.commit()
 
-    print(f"Trimit la Colab un istoric de {len(conversation_history)} mesaje...")
+    recent_msgs = ChatMessage.query.filter_by(session_id=session.id).order_by(ChatMessage.timestamp.desc()).limit(10).all()
+    recent_msgs.reverse()
+
+    conversation_history = [{"role": "system", "content": session.disease.system_prompt}]
+    for msg in recent_msgs:
+        role = "user" if msg.sender == "student" else "assistant"
+        conversation_history.append({"role": role, "content": msg.content})
 
     payload = {
         "messages": conversation_history,
@@ -199,20 +363,222 @@ def chat():
     }
 
     try:
-        response = requests.post(HF_URL, json=payload, headers=HF_HEADERS)
-
+        response = requests.post(HF_URL, json=payload, headers=HF_HEADERS, timeout=120)
         if response.status_code == 200:
             ai_data = response.json()
             bot_reply = ai_data.get("generated_text", "")
-
-            conversation_history.append({"role": "assistant", "content": bot_reply})
-
+            db.session.add(ChatMessage(session_id=session.id, sender="patient", content=bot_reply))
+            db.session.commit()
             return jsonify({"reply": bot_reply})
         else:
-            return jsonify({"error": f"Colab Error: {response.status_code}"}), response.status_code
-
+            return jsonify({"error": f"LLM Error: {response.status_code}"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --- CORE BADGE LOGIC HERE ---
+def check_and_award_badge(user, badge_name, xp_bonus=0):
+    existing_badge = UserBadge.query.filter_by(user_id=user.id, badge_name=badge_name).first()
+    if not existing_badge:
+        db.session.add(UserBadge(user_id=user.id, badge_name=badge_name))
+        user.xp += xp_bonus
+        return f" [BADGE: {badge_name}]"
+    return ""
+
+@app.route("/chat/diagnose", methods=["POST"])
+@jwt_required()
+def check_diagnosis():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    data = request.get_json()
+    session_id = data.get("session_id")
+    student_diagnosis = data.get("diagnosis", "").strip().lower()
+
+    session = ChatSession.query.filter_by(id=session_id, user_id=current_user_id).first()
+    if not session:
+        return jsonify({"error": "Session not found"}), 404
+
+    correct_name = session.disease.name.lower()
+    is_correct = correct_name in student_diagnosis
+
+    xp_gained = 0
+    message = ""
+    badge_alerts = ""
+
+    if is_correct:
+        xp_gained = 100
+        session.was_correct = True
+        user.consecutive_correct += 1 # Increment streak
+        message = f"Correct! The diagnosis was {session.disease.name}."
+
+        # 1. BADGE: Speed Demon (< 2 mins)
+        duration = (datetime.datetime.utcnow() - session.start_time).total_seconds()
+        if duration < 120:
+            badge_alerts += check_and_award_badge(user, "Speed Demon", 100)
+
+        # 2. BADGE: Perfect Ten (10 correct in a row)
+        if user.consecutive_correct >= 10:
+            badge_alerts += check_and_award_badge(user, "Perfect Ten", 300)
+
+        # 3. BADGE: Endodontist Expert (20 Pulp-related)
+        if session.disease.category == 'Pulpal':
+            # Count previous correct pulpal cases
+            # Note: This query is a bit complex for SQLite in raw SQLAlchemy without joins, simplified here:
+            pulpal_count = ChatSession.query.join(Disease).filter(
+                ChatSession.user_id==user.id,
+                ChatSession.was_correct==True,
+                Disease.category=='Pulpal'
+            ).count()
+            # +1 because the current session isn't committed yet
+            if pulpal_count + 1 >= 20:
+                badge_alerts += check_and_award_badge(user, "Endodontist Expert", 500)
+
+        # 4. BADGE: Periodontal Pro (20 Perio-related)
+        if session.disease.category == 'Periodontal':
+            perio_count = ChatSession.query.join(Disease).filter(
+                ChatSession.user_id==user.id,
+                ChatSession.was_correct==True,
+                Disease.category=='Periodontal'
+            ).count()
+            if perio_count + 1 >= 20:
+                badge_alerts += check_and_award_badge(user, "Periodontal Pro", 500)
+
+    else:
+        xp_gained = 20
+        user.consecutive_correct = 0 # Reset streak
+        message = f"Incorrect. The correct diagnosis was {session.disease.name}. (+20 XP for effort)"
+
+    # --- GLOBAL BADGES (Correct or Incorrect) ---
+
+    # 5. BADGE: First Steps (First case completed)
+    badge_alerts += check_and_award_badge(user, "First Steps", 50)
+
+    # 6. BADGE: Master Diagnostician (100 total cases)
+    total_cases = ChatSession.query.filter_by(user_id=user.id, is_completed=True).count()
+    if total_cases + 1 >= 100:
+        badge_alerts += check_and_award_badge(user, "Master Diagnostician", 2000)
+
+    # 7. BADGE: Early Bird (Before 7 AM server time)
+    current_hour = datetime.datetime.utcnow().hour
+    if current_hour < 7:
+        badge_alerts += check_and_award_badge(user, "Early Bird", 25)
+
+    # 8. BADGE: Night Owl (After 11 PM server time)
+    if current_hour >= 23:
+        badge_alerts += check_and_award_badge(user, "Night Owl", 25)
+
+    # --- STREAK LOGIC & BADGES ---
+    today = datetime.date.today()
+    if user.last_active_date != today:
+        yesterday = today - datetime.timedelta(days=1)
+        if user.last_active_date == yesterday:
+            user.streak += 1
+        else:
+            user.streak = 1
+        user.last_active_date = today
+
+    # 9. BADGE: Week Warrior (7 day streak)
+    if user.streak >= 7:
+        badge_alerts += check_and_award_badge(user, "Week Warrior", 150)
+
+    # 10. BADGE: Monthly Master (30 day streak)
+    if user.streak >= 30:
+        badge_alerts += check_and_award_badge(user, "Monthly Master", 1000)
+
+    # Finalize
+    user.xp += xp_gained
+    session.is_completed = True
+    session.end_time = datetime.datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({
+        "correct": is_correct,
+        "message": message + badge_alerts,
+        "xp_gained": xp_gained,
+        "correct_diagnosis": session.disease.name
+    })
+
+@app.route("/auth/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    completed_sessions = [s for s in user.sessions if s.is_completed]
+    total_cases = len(completed_sessions)
+    correct_cases = len([s for s in completed_sessions if s.was_correct])
+
+    accuracy = 0
+    if total_cases > 0:
+        accuracy = int((correct_cases / total_cases) * 100)
+
+    rank = User.query.filter(User.xp > user.xp).count() + 1
+    earned_badge_names = [b.badge_name for b in user.badges]
+
+    return jsonify({
+        "username": user.username,
+        "xp": user.xp,
+        "cases_completed": total_cases,
+        "accuracy": accuracy,
+        "streak": user.streak,
+        "last_active_date": user.last_active_date.isoformat() if user.last_active_date else None,
+        "earned_badges": earned_badge_names,
+        "rank": rank,
+        "role": user.role
+    })
+
+@app.route("/auth/update-profile", methods=["PUT"])
+@jwt_required()
+def update_profile():
+    current_user_id = get_jwt_identity()
+    user = User.query.get(current_user_id)
+    data = request.get_json()
+
+    new_username = data.get("username", "").strip()
+    new_role = data.get("role", "").strip()
+
+    if new_username:
+        existing = User.query.filter_by(username=new_username).first()
+        if existing and existing.id != user.id:
+            return jsonify({"error": "Username already taken"}), 409
+        user.username = new_username
+
+    if new_role:
+        user.role = new_role
+
+    db.session.commit()
+    return jsonify({"message": "Profile updated successfully"})
+
+@app.route("/auth/leaderboard", methods=["GET"])
+def get_leaderboard():
+    top_users = User.query.order_by(User.xp.desc()).limit(50).all()
+    leaderboard_data = []
+    for index, u in enumerate(top_users):
+        leaderboard_data.append({
+            "id": u.id,
+            "username": u.username,
+            "xp": u.xp,
+            "streak": u.streak,
+            "rank": index + 1,
+            "level": int(u.xp / 1000) + 1
+        })
+    return jsonify(leaderboard_data)
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    with app.app_context():
+        db.create_all()
+        if DISEASE_DATA and not Disease.query.first():
+            print("Seeding database with diseases...")
+            for d in DISEASE_DATA:
+                db.session.add(Disease(
+                    name=d["name"],
+                    category=d.get("category", "General"),
+                    system_prompt=d["prompt"]
+                ))
+            db.session.commit()
+            print("Seeding complete.")
+
+    print("Starting DentalSim Backend on port 8000...")
+    app.run(host="0.0.0.0", port=9003, debug=True)
